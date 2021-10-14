@@ -1,0 +1,19 @@
+defpackage load-vms :
+  import core
+  import collections
+  import stz/vm-ir
+  import stz/vm
+
+defn main () :
+  ;Load in all of the vmpackages.
+  ;Be really careful about ordering.
+  val filenames = to-tuple $ command-line-arguments()[1 to false]
+  println("Reading files: %," % [filenames])
+  val vmpackages = map(read-vm-package, filenames)
+
+  val vm = VirtualMachine()
+  load(vm, vmpackages, false)
+  for p in vmpackages do :
+    init-package(vm, name(p))
+
+main()
