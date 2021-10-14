@@ -1,0 +1,92 @@
+defpackage core
+
+protected extern printf: (ptr<byte>, ? ...) -> int
+
+protected lostanza deftype Type :
+   length: long
+   code: ptr<?>
+   free: ref<?> ...
+public lostanza deftype Tuple<T> :
+  length: long
+  var items: ref<T> ...
+protected lostanza deftype Box :
+   item: ref<?>
+protected lostanza deftype Fn :
+   length: long
+   code: ptr<?>
+   free: ref<?> ...
+protected lostanza deftype StackFrame :
+  var return: long
+  var liveness-map: long
+  var slots: long ...
+protected lostanza deftype Stack :
+  var size: long
+  var frames: ptr<StackFrame>
+  var stack-pointer: ptr<StackFrame>
+  var pc: long
+public lostanza deftype Byte :
+  value: byte
+
+public lostanza deftype Char :
+  value: byte
+
+public lostanza deftype Int :
+  value: int
+
+public lostanza deftype Long :
+  value: long
+
+public lostanza deftype Float :
+  value: float
+
+public lostanza deftype Double :
+  value: double
+
+public lostanza deftype True
+public lostanza deftype False
+public deftype List<T>
+lostanza deftype FullList<T> <: List<T> :
+  head: ref<T>
+  tail: ref<List<T>>
+lostanza deftype NilList <: List<Void>
+public lostanza deftype String :
+  length: long
+  var hash: int
+  var chars: byte ...
+public deftype Symbol
+public lostanza deftype StringSymbol <: Symbol :
+  name: ref<String>
+public deftype GenSymbol <: Symbol
+public deftype Unique
+
+public lostanza deftype LivenessTracker :
+  value: ref<False|Unique>
+  tail: ptr<?>
+
+var EXECUTION-HALT:() -> Void
+defn halt () -> Void : EXECUTION-HALT()
+public defn fatal (msg) -> Void : halt()
+protected lostanza defn arity-error (arity:long) -> ref<Void> : return fatal(String("AE"))
+protected defn no-method-error (multi:String, args:Tuple) : fatal("NME")
+protected defn amb-method-error (multi:String, args:Tuple) : fatal("AME")
+protected lostanza defn tuple-length-error (actual-len:long, expected-len:long) -> ref<Void> : return fatal(String("TLE"))
+protected defn no-branch-error (args:Tuple) : fatal("NBE")
+protected defn amb-method-error (multi:String, args:Tuple) : fatal("ABE")
+protected lostanza defn cast-error (type:ref<Type>, obj:ref<?>, ctxt:int) -> ref<Void> : return fatal(String("CE"))
+protected defn variable-uninitialized-error (name:String|False) -> Void : fatal("VUE")
+protected lostanza defn invalid-return-error () -> ref<Void> : return fatal(String("IRE"))
+protected lostanza defn void-tuple (n:long) -> ref<Tuple> : return new Tuple{n}
+protected lostanza defn initialize-constants () -> ref<False> : return false
+lostanza defn extend-heap (size:long) -> long : return 0
+lostanza defn extend-stack (size:long) -> long : return 0
+lostanza defn print-stack-trace (stack:ref<Stack>) -> ref<False> : return false
+lostanza defn collect-garbage (size:long) -> long : return 0
+lostanza defn class-name (x:int) -> ptr<byte> : return ""
+public lostanza defn String (chars:ptr<byte>) -> ref<String> : return new String{1, 0}
+defn execute-toplevel-command (f:() -> False) -> True|False : false
+
+lostanza defn main () -> ref<False> :
+  call-c printf("HELLO WORLD\n")
+  return false
+
+main()
