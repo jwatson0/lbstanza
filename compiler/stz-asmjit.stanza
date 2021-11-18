@@ -1,0 +1,204 @@
+defpackage stz/asmjit :
+  import core
+
+extern jit_runtime_new: () -> ptr<?>
+extern jit_runtime_delete: (ptr<?>) -> int
+extern jit_runtime_add: (ptr<?>, ptr<?>) -> ptr<?>
+extern jit_runtime_release: (ptr<?>, ptr<?>) -> int
+extern code_holder_new: (ptr<?>) -> ptr<?>
+extern code_holder_delete: (ptr<?>) -> int
+extern code_holder_label_offset: (ptr<?>, ptr<?>) -> int
+extern assembler_new: (ptr<?>) -> ptr<?>
+extern assembler_delete: (ptr<?>) -> int
+extern assembler_new_label: (ptr<?>) -> ptr<?>
+extern assembler_bind: (ptr<?>, ptr<?>) -> int
+extern assembler_push: (ptr<?>, ptr<?>) -> int
+extern assembler_pop: (ptr<?>, ptr<?>) -> int
+extern assembler_call_label: (ptr<?>, ptr<?>) -> int
+extern assembler_call_reg: (ptr<?>, ptr<?>) -> int
+extern assembler_ret: (ptr<?>) -> int
+extern assembler_mov_const: (ptr<?>, ptr<?>, long) -> int
+extern assembler_mov_label: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_mov_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_mov_gp_ptr: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_mov_ptr_gp: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_jmp_label: (ptr<?>, ptr<?>) -> int
+extern assembler_jmp_mem: (ptr<?>, ptr<?>) -> int
+extern assembler_jmp_reg: (ptr<?>, ptr<?>) -> int
+extern assembler_jne: (ptr<?>, ptr<?>) -> int
+extern assembler_add_int: (ptr<?>, ptr<?>, long) -> int
+extern assembler_add_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_shl: (ptr<?>, ptr<?>, int) -> int
+extern x86_ptr_gp_base_const_offset_size: (ptr<?>, long, long) -> ptr<?>
+extern x86_ptr_gp_base_index_const_shift_offset_size: (ptr<?>, ptr<?>, long, long, long) -> ptr<?>
+extern x86_ptr_label_base_index_const_shift_offset_size: (ptr<?>, ptr<?>, long, long, long) -> ptr<?>
+extern x86_ptr_label_base_const_index_size: (ptr<?>, long, long) -> ptr<?>
+extern func_call: (ptr<?>) -> int
+extern x86_eax: () -> ptr<?>
+extern x86_rax: () -> ptr<?>
+extern x86_rcx: () -> ptr<?>
+extern x86_rdx: () -> ptr<?>
+extern x86_rbx: () -> ptr<?>
+extern x86_rsi: () -> ptr<?>
+extern x86_rdi: () -> ptr<?>
+extern x86_rsp: () -> ptr<?>
+extern x86_rbp: () -> ptr<?>
+extern x86_r8: () -> ptr<?>
+extern x86_r9: () -> ptr<?>
+extern x86_r10: () -> ptr<?>
+extern x86_r11: () -> ptr<?>
+extern x86_r12: () -> ptr<?>
+extern x86_r13: () -> ptr<?>
+extern x86_r14: () -> ptr<?>
+extern x86_r15: () -> ptr<?>
+
+public lostanza deftype JitRuntime :
+  value: ptr<?>
+public lostanza deftype CodeHolder :
+  value: ptr<?>
+public lostanza deftype Assembler :
+  value: ptr<?>
+public lostanza deftype Label :
+  value: ptr<?>
+public lostanza deftype Gp :
+  value: ptr<?>
+public lostanza deftype Func :
+  value: ptr<?>
+public lostanza deftype MemPtr :
+  value: ptr<?>
+
+public lostanza defn value (f:ref<Func>) -> ref<Long> :
+  return new Long{f.value as long}
+
+public lostanza defn MemPtr (base-ptr:ref<Gp>, offset:ref<Int>, size:ref<Int>) -> ref<MemPtr> :
+  val p = call-c x86_ptr_gp_base_const_offset_size(base-ptr.value, offset.value, size.value)
+  return new MemPtr{p}
+
+public lostanza defn MemPtr (base-ptr:ref<Gp>, index-ptr:ref<Gp>, shift:ref<Int>, offset:ref<Int>, size:ref<Int>) -> ref<MemPtr> :
+  val p = call-c x86_ptr_gp_base_index_const_shift_offset_size(base-ptr.value, index-ptr.value, shift.value, offset.value, size.value)
+  return new MemPtr{p}
+
+public lostanza defn MemPtr (base-ptr:ref<Label>, index-ptr:ref<Gp>, shift:ref<Int>, offset:ref<Int>, size:ref<Int>) -> ref<MemPtr> :
+  val p = call-c x86_ptr_label_base_index_const_shift_offset_size(base-ptr.value, index-ptr.value, shift.value, offset.value, size.value)
+  return new MemPtr{p}
+
+public lostanza defn MemPtr (base-ptr:ref<Label>, index:ref<Int>, size:ref<Int>) -> ref<MemPtr> :
+  val p = call-c x86_ptr_label_base_const_index_size(base-ptr.value, index.value, size.value)
+  return new MemPtr{p}
+
+public lostanza defn eax () -> ref<Gp> :
+  return new Gp{ call-c x86_eax() }
+public lostanza defn rax () -> ref<Gp> :
+  return new Gp{ call-c x86_rax() }
+public lostanza defn rcx () -> ref<Gp> :
+  return new Gp{ call-c x86_rcx() }
+public lostanza defn rdx () -> ref<Gp> :
+  return new Gp{ call-c x86_rdx() }
+public lostanza defn rbx () -> ref<Gp> :
+  return new Gp{ call-c x86_rbx() }
+public lostanza defn rsi () -> ref<Gp> :
+  return new Gp{ call-c x86_rsi() }
+public lostanza defn rdi () -> ref<Gp> :
+  return new Gp{ call-c x86_rdi() }
+public lostanza defn rsp () -> ref<Gp> :
+  return new Gp{ call-c x86_rsp() }
+public lostanza defn rbp () -> ref<Gp> :
+  return new Gp{ call-c x86_rbp() }
+public lostanza defn r8 () -> ref<Gp> :
+  return new Gp{ call-c x86_r8() }
+public lostanza defn r9 () -> ref<Gp> :
+  return new Gp{ call-c x86_r9() }
+public lostanza defn r10 () -> ref<Gp> :
+  return new Gp{ call-c x86_r10() }
+public lostanza defn r11 () -> ref<Gp> :
+  return new Gp{ call-c x86_r11() }
+public lostanza defn r12 () -> ref<Gp> :
+  return new Gp{ call-c x86_r12() }
+public lostanza defn r13 () -> ref<Gp> :
+  return new Gp{ call-c x86_r13() }
+public lostanza defn r14 () -> ref<Gp> :
+  return new Gp{ call-c x86_r14() }
+public lostanza defn r15 () -> ref<Gp> :
+  return new Gp{ call-c x86_r15() }
+public lostanza defn jit-runtime-new () -> ref<JitRuntime> :
+  return new JitRuntime{ call-c jit_runtime_new() }
+public lostanza defn delete (rt:ref<JitRuntime>) -> ref<False> :
+  call-c jit_runtime_delete(rt.value)
+  return false
+public lostanza defn add (rt:ref<JitRuntime>, c:ref<CodeHolder>) -> ref<Func> :
+  return new Func{ call-c jit_runtime_add(rt.value, c.value) }
+public lostanza defn release (rt:ref<JitRuntime>, func:ref<Func>) -> ref<False> :
+  call-c jit_runtime_release(rt.value, func.value)
+  return false
+public lostanza defn code-holder-new (rt:ref<JitRuntime>) -> ref<CodeHolder> :
+  return new CodeHolder{ call-c code_holder_new(rt.value) }
+public lostanza defn delete (c:ref<CodeHolder>) -> ref<False> :
+  call-c jit_runtime_delete(c.value)
+  return false
+public lostanza defn label-offset (c:ref<CodeHolder>, f:ref<Label>) -> ref<Int> :
+  return new Int{ call-c code_holder_label_offset(c.value, f.value) }
+public lostanza defn assembler-new (c:ref<CodeHolder>) -> ref<Assembler> :
+  return new Assembler{ call-c assembler_new(c.value) }
+public lostanza defn new-label (a:ref<Assembler>) -> ref<Label> :
+  return new Label{ call-c assembler_new_label(a.value) }
+public lostanza defn delete (a:ref<Assembler>) -> ref<False> :
+  call-c assembler_delete(a.value)
+  return false
+public lostanza defn bind (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
+  call-c assembler_bind(a.value, lab.value)
+  return false
+public lostanza defn push (a:ref<Assembler>, reg:ref<Gp>) -> ref<False> :
+  call-c assembler_push(a.value, reg.value)
+  return false
+public lostanza defn pop (a:ref<Assembler>, reg:ref<Gp>) -> ref<False> :
+  call-c assembler_pop(a.value, reg.value)
+  return false
+public lostanza defn call (a:ref<Assembler>, f:ref<Label>) -> ref<False> :
+  call-c assembler_call_label(a.value, f.value)
+  return false
+public lostanza defn call (a:ref<Assembler>, f:ref<Gp>) -> ref<False> :
+  call-c assembler_call_reg(a.value, f.value)
+  return false
+public lostanza defn ret (a:ref<Assembler>) -> ref<False> :
+  call-c assembler_ret(a.value)
+  return false
+public lostanza defn add (a:ref<Assembler>, reg:ref<Gp>, value:ref<Int>) -> ref<False> :
+  call-c assembler_add_int(a.value, reg.value, value.value)
+  return false
+public lostanza defn add (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_add_reg(a.value, dst.value, src.value)
+  return false
+public lostanza defn shl (a:ref<Assembler>, reg:ref<Gp>, value:ref<Int>) -> ref<False> :
+  call-c assembler_shl(a.value, reg.value, value.value)
+  return false
+public lostanza defn mov (a:ref<Assembler>, reg:ref<Gp>, value:ref<Long>) -> ref<False> :
+  call-c assembler_mov_const(a.value, reg.value, value.value)
+  return false
+public lostanza defn mov (a:ref<Assembler>, reg:ref<Gp>, value:ref<Label>) -> ref<False> :
+  call-c assembler_mov_label(a.value, reg.value, value.value)
+  return false
+public lostanza defn mov (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_mov_reg(a.value, dst.value, src.value)
+  return false
+public lostanza defn mov (a:ref<Assembler>, reg:ref<Gp>, ptr:ref<MemPtr>) -> ref<False> :
+  call-c assembler_mov_gp_ptr(a.value, reg.value, ptr.value)
+  return false
+public lostanza defn mov (a:ref<Assembler>, ptr:ref<MemPtr>, reg:ref<Gp>) -> ref<False> :
+  call-c assembler_mov_ptr_gp(a.value, ptr.value, reg.value)
+  return false
+public lostanza defn call (func:ref<Func>) -> ref<Long> :
+  return new Long{ call-c func_call(func.value) }
+
+public lostanza defn jmp (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
+  call-c assembler_jmp_label(a.value, lab.value)
+  return false
+public lostanza defn jmp (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
+  call-c assembler_jmp_reg(a.value, x.value)
+  return false
+public lostanza defn jmp (a:ref<Assembler>, ptr:ref<MemPtr>) -> ref<False> :
+  call-c assembler_jmp_label(a.value, ptr.value)
+  return false
+public lostanza defn jne (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
+  call-c assembler_jmp_label(a.value, lab.value)
+  return false
+

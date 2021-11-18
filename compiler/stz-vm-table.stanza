@@ -5,7 +5,7 @@ defpackage stz/vm-table :
   import stz/typeset
   import stz/vm
   import stz/algorithms
-  import stz/vm-encoder
+  import stz/vm-jit
   import stz/stable-arrays
   import stz/utils
   import stz/dyn-tree
@@ -24,7 +24,7 @@ public lostanza deftype VMTable :
   
   ;Globals
   global-table:ref<Vector<LoadedGlobal|False>>  ;For globals
-  var global-offsets:ref<StableLongArray>           ;For global offsets
+  var global-offsets:ref<StableLongArray>       ;For global offsets
   globals:ref<Buffer>
 
   ;Classes
@@ -40,10 +40,7 @@ public lostanza deftype VMTable :
   data:ref<Buffer>
 
   ;Functions
-  var function-addresses:ref<StableIntArray>
-
-  ;Bytecode
-  bytecode:ref<Buffer>
+  var functions:ref<StableLongArray>
 
   ;Externs
   var extern-addresses:ref<StableLongArray>
@@ -81,8 +78,7 @@ public lostanza defn VMTable (class-table:ref<ClassTable>, branch-table:ref<Bran
     Buffer(),
 
     ;Functions
-    StableIntArray(new Int{1024}, new Int{-1}),
-    Buffer(),
+    StableLongArray(new Int{1024}, new Long{-1L}),
 
     ;Externs
     StableLongArray(new Int{32}, new Long{-1L}),
@@ -448,17 +444,11 @@ public lostanza defn load-callback (vmt:ref<VMTable>, callback-index:ref<Int>, f
 ;============================================================
 
 public lostanza defn load-function (vmt:ref<VMTable>, id:ref<Int>, ef:ref<EncodedFunction>) -> ref<False> :
-  ;Load bytecode into bytecode vector
-  val num-bytes = length(buffer(ef))
-  val offset = alloc(vmt.bytecode, num-bytes.value)
-  call-c memcpy(vmt.bytecode.mem + offset, data(buffer(ef)), num-bytes.value)
+  val f = value(ef)
+  vmt.functions = put(vmt.functions, id, f, new Long{0})
 
-  ;Put into function table
-  val pos = new Int{(offset / 4) as int}
-  vmt.function-addresses = put(vmt.function-addresses, id, pos, new Int{-1})
-  
   ;Load fileinfos into fileinfo table
-  load-fileinfos(vmt, fileinfos(ef), pos)
+  ;load-fileinfos(vmt, fileinfos(ef), pos)
   
   return false
 

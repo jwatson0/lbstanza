@@ -1,0 +1,1741 @@
+defpackage stz/vm-jit :
+  import core
+  import collections
+  import stz/vm-ir
+  import stz/typeset
+  import stz/vm-ids
+  import stz/basic-ops
+  import stz/call-records
+  import stz/backend
+  import stz/utils
+  import stz/set-utils
+  import stz/conversion-utils
+  import stz/dispatch-dag
+  import stz/asmjit
+
+extern c_trampoline: (ptr<?>, ptr<?>, ptr<?>) -> int
+
+;TODO: DUMMY
+defn Func (rt:JitRuntime) -> Func :
+  add(rt, code-holder-new(rt))
+
+public deftype EncodingResolver
+public defmulti liveness-map (r:EncodingResolver, live:Tuple<Int>, num-locals:Int) -> Int
+public defmulti object-header-size (r:EncodingResolver) -> Int
+public defmulti object-size-on-heap (r:EncodingResolver, sz:Int) -> Int
+public defmulti stack-size (r:EncodingResolver) -> Int
+public defmulti dispatch-format (r:EncodingResolver, branches:Tuple<Tuple<TypeSet>>) -> Int
+public defmulti match-format (r:EncodingResolver, branches:Tuple<Tuple<TypeSet>>) -> Int
+public defmulti method-format (r:EncodingResolver, multi:Int, num-header-args:Int, num-args:Int) -> Int
+public defmulti marker (r:EncodingResolver, type:Int) -> Int
+public defmulti void-marker (r:EncodingResolver) -> Int
+public defmulti ref-offset (r:EncodingResolver) -> Int
+public defmulti type-is-final? (r:EncodingResolver, n:Int) -> True|False
+public defmulti marker? (r:EncodingResolver, n:Int) -> True|False
+public defmulti tagbits (r:EncodingResolver, typeid:Int) -> Int
+
+public defstruct EncodedFunction :
+  func: Func
+  fileinfos: Vector<FileInfoEntry>
+
+public defn value (ef:EncodedFunction) -> Long :
+  value(func(ef))
+  
+public defstruct FileInfoEntry :
+  pc: Int
+  fileinfo: FileInfo
+
+defn c-params () : [rdi(), rsi(), rdx(), rcx(), r8(), r9()]
+
+defn bind-parameters (a:Assembler, args:Seqable<Gp>) :
+  val params = c-params()
+  ;TODO: CHECK NOT TOO MANY ARGS
+  for (param in params, arg in args) do :
+    mov(a, param, arg)
+
+extern c_trampoline_stub: (long, ptr<long>, ptr<long>) -> int
+
+lostanza defn c-trampoline (a:ref<Assembler>, args:ref<Tuple<Gp>>) -> ref<False> :
+  caller-save-registers(a)
+  bind-parameters(a, args)
+  mov(a, tmp1(), new Long{addr!(c_trampoline) as long})
+  call(a, tmp1())
+  caller-restore-registers(a)
+  return false
+
+val SIZEOF-INT  = 4
+val SIZEOF-LONG = 8
+
+val vmstate-offsets = Counter(0)
+val VMSTATE-INSTRUCTIONS-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+val VMSTATE-REGISTERS-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+val VMSTATE-GLOBAL-OFFSETS-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+val VMSTATE-GLOBAL-MEM-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+val VMSTATE-CONST-TABLE-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+val VMSTATE-CONST-MEM-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+val VMSTATE-DATA-OFFSETS-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+val VMSTATE-DATA-MEM-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+val VMSTATE-FUNCTIONS-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+val VMSTATE-HEAP-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+val VMSTATE-HEAP-TOP-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+val VMSTATE-HEAP-LIMIT-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+val VMSTATE-FREE-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+val VMSTATE-FREE-LIMIT-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+val VMSTATE-CURRENT-STACK-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+println("VMSTATE-CURRENT-STACK-OFFSET %_" % [VMSTATE-CURRENT-STACK-OFFSET])
+val VMSTATE-SYSTEM-STACK-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+val VMSTATE-SYSTEM-REGISTERS-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+val VMSTATE-TRIE-TABLE-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
+
+val stack-frame-offsets = Counter(0)
+val STACK-FRAME-RETURN-OFFSET = next(stack-frame-offsets, SIZEOF-LONG)
+val STACK-FRAME-LIVENESS-MAP-OFFSET = next(stack-frame-offsets, SIZEOF-LONG)
+val STACK-FRAME-SLOTS-OFFSET = next(stack-frame-offsets, SIZEOF-LONG)
+val SIZEOF-STACKFRAME = value(stack-frame-offsets)
+
+val stack-offsets = Counter(0)
+val STACK-SIZE-OFFSET = next(stack-offsets, SIZEOF-LONG)
+val STACK-FRAMES-OFFSET = next(stack-offsets, SIZEOF-LONG)
+val STACK-STACK-POINTER-OFFSET = next(stack-offsets, SIZEOF-LONG)
+val STACK-PC-OFFSET = next(stack-offsets, SIZEOF-LONG)
+
+defn vmstate-reg (a:Assembler, offset:Int) -> Gp :
+  mov(a, rax(), MemPtr(vmstate(), offset, SIZEOF-LONG))
+  rax()
+
+defn vmstate () :        r8()
+defn registers () :      r9()
+defn stack-pointer () :  r10()
+defn stk () :            r11()
+defn current-stack () :  r12()
+defn functions () :      r13()
+defn etc-saved-registers () : [vmstate(), registers(), functions(), stack-pointer(), stk()]
+defn tmp1 () :           r14()
+defn tmp2 () :           r15()
+
+defn untag-stack (a:Assembler, stk:Gp) -> Gp :
+  mov(a, tmp1(), stk)
+  add(a, tmp1(), 8 - 1)
+  tmp1()
+
+extern malloc: (long) -> ptr<?>
+extern strcpy: (ptr<byte>, ptr<byte>) -> ptr<?>
+extern printf: (ptr<byte>, ? ...) -> int
+
+lostanza defn printf-format (s:ref<String>) -> ref<Long> :
+  val n = length(s)
+  val d = call-c malloc(n.value + 1)
+  call-c strcpy(d, addr!(s.chars))
+  return new Long{d as long}
+
+lostanza defn printf-addr () -> ref<Long> :
+  return new Long{addr!(printf) as long}
+
+defn caller-save-registers (a:Assembler) :
+  for reg in etc-saved-registers() do :
+    push(a, reg)
+
+defn caller-restore-registers (a:Assembler) :
+  for reg in reverse $ to-list $ etc-saved-registers() do :
+    pop(a, reg)
+
+defn debug (a:Assembler, format:String, a0:Gp, a1:Gp) :
+  caller-save-registers(a)
+  mov(a, rdi(), printf-format(format))
+  mov(a, rsi(), a0)
+  mov(a, rdx(), a1)
+  mov(a, rax(), 0L)
+  mov(a, tmp1(), printf-addr())
+  call(a, tmp1())
+  caller-restore-registers(a)
+
+defn debug (a:Assembler, format:String) : debug(a, format, rax(), rax())
+defn debug (a:Assembler, format:String, a0:Gp) : debug(a, format, a0, rax())
+
+extern dump_memory: (ptr<long>, int) -> int
+
+lostanza defn dump-memory-addr () -> ref<Long> :
+  return new Long{addr!(dump_memory) as long}
+
+lostanza defn dump-memory (a:ref<Assembler>, start:ref<Gp>, n:ref<Long>) -> ref<False> :
+  caller-save-registers(a)
+  mov(a, rdi(), start)
+  mov(a, rsi(), n)
+  mov(a, rax(), new Long{0L})
+  mov(a, tmp1(), dump-memory-addr())
+  call(a, tmp1())
+  caller-restore-registers(a)
+  return false
+
+public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
+  val code = code-holder-new(rt)
+  val a = assembler-new(code)
+  ; SEGFAULT
+  ; mov(a, rax(), 0L)
+  ; mov(a, rax(), MemPtr(rax(), 0, 0))
+  ; Setup JIT registers
+  mov(a, vmstate(), vms)
+  debug(a, "JIT VMSTATE %llx\n" vmstate())
+  mov(a, registers(), vmstate-reg(a, VMSTATE-REGISTERS-OFFSET))
+  mov(a, functions(), vmstate-reg(a, VMSTATE-FUNCTIONS-OFFSET))
+  mov(a, current-stack(), vmstate-reg(a, VMSTATE-CURRENT-STACK-OFFSET))
+  debug(a, "JIT CURRENT-STACK %llx\n" current-stack())
+  mov(a, stk(), untag-stack(a, current-stack()))
+  debug(a, "JIT STK %llx\n" stk())
+  dump-memory(a, stk(), 4L)
+  println("STACK-STACK-POINTER-OFFSET %_" % [STACK-STACK-POINTER-OFFSET])
+  mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG))
+  debug(a, "JIT STACK-POINTER %llx\n" stack-pointer())
+  ; call init
+  mov(a, rax(), MemPtr(functions(), init-id * SIZEOF-LONG, SIZEOF-LONG))
+  debug(a, "JIT INIT %llx\n" rax())
+  mov(a, rax(), MemPtr(functions(), init-id * SIZEOF-LONG, SIZEOF-LONG))
+  call(a, rax())
+  ; mov(a, rax(), 999L)
+  ; mov(a, rax(), stk())
+  ; mov(a, rax(), current-stack())
+  ; mov(a, rax(), vmstate())
+  ; mov(a, rax(), vms)
+  ; mov(a, rax(), to-long(init-id))
+  ret(a)
+  add(rt, code)
+  ; TODO: CLEANUP
+
+defn compute-stack-limit (a:Assembler) -> Gp :
+  mov(a, rax(), MemPtr(stk(), STACK-FRAMES-OFFSET, SIZEOF-LONG))
+  mov(a, tmp1(), MemPtr(stk(), STACK-SIZE-OFFSET, SIZEOF-LONG))
+  add(a, rax(), tmp1())
+  rax()
+
+public defn encode (func:VMFunction,
+                    rt:JitRuntime,
+                    resolver:EncodingResolver,
+                    backend:Backend) -> EncodedFunction :
+  val code = code-holder-new(rt)
+  val a = assembler-new(code)
+    
+  debug(a, "ENTERING\n")
+
+  defn stack-limit () :    compute-stack-limit(a)
+  defn heap-top () :       vmstate-reg(a, VMSTATE-HEAP-TOP-OFFSET)
+  defn heap-limit () :     vmstate-reg(a, VMSTATE-HEAP-LIMIT-OFFSET)
+  defn global-offsets () : vmstate-reg(a, VMSTATE-GLOBAL-OFFSETS-OFFSET)
+  defn global-mem () :     vmstate-reg(a, VMSTATE-GLOBAL-MEM-OFFSET)
+  defn data-offsets () :   vmstate-reg(a, VMSTATE-DATA-OFFSETS-OFFSET)
+  defn data-mem () :       vmstate-reg(a, VMSTATE-DATA-MEM-OFFSET)
+
+  ;Encode instructions into this byte buffer
+  ;TODO: REMOVE
+  val buffer = ByteBuffer()
+  defn buffer-pos () : write-position(buffer) / 4
+
+  ;Accumulate file information entries for implementing
+  ;stack traces.
+  val fileinfo-table = Vector<FileInfoEntry>()
+  defn record-info (info:FileInfo|False) :
+    match(info:FileInfo) :
+      add(fileinfo-table, FileInfoEntry(buffer-pos(), info))
+
+  ;Calculation of sizes
+  defn object-size (num-obj:Int, size-on-heap:Int) :
+    num-obj * object-header-size(resolver) + size-on-heap
+  defn stack-size () :
+    object-size(1, /stack-size(resolver))
+
+  ;Split a tuple of VMBranch into typesets and destinations
+  defn split-types-and-dests (bs:Tuple<VMBranch>) -> [Tuple<Tuple<TypeSet>>, Tuple<Int>] :
+    val types = map(types, bs)
+    val targets = map(n, bs)
+    [types, targets]
+
+  ;Check whether type is final.
+  ;If the function returns true, it means that the type cannot be redefined.
+  defn type-is-final? (t:TypeSet) :
+    match(t) :
+      (t:SingleType) : /type-is-final?(resolver, type(t))
+      (t:OrType) : all?(type-is-final?, types(t))
+      (t:AndType) : any?(type-is-final?, types(t))
+      (t:TopType) : true
+
+  ;Check whether all types in branch are final.
+  defn branch-is-final? (b:VMBranch) :
+    all?(type-is-final?, types(b))
+
+  defn stack-frame-slots-offset () -> Gp :
+    mov(a, rax(), MemPtr(stack-pointer(), STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG))
+    rax()
+  defn SET-REG (r:Int, v:Gp) :
+    mov(a, MemPtr(registers(), r * SIZEOF-LONG, SIZEOF-LONG), v)
+    ; registers[r] = v
+    false
+  defn SET-LOCAL (l:Int, v:Gp) :
+    mov(a, MemPtr(stack-frame-slots-offset(), l * SIZEOF-LONG, SIZEOF-LONG), v)
+    ; stack_pointer->slots[l] = v;
+    false
+  defn SET-LOCAL-FLOAT (l:Int,v:Gp) :
+    mov(a, MemPtr(stack-frame-slots-offset(), l * SIZEOF-LONG, SIZEOF-LONG), v)
+    ; float* addr = (float*)&(stack_pointer->slots[l])
+    ; *addr = v
+    false
+  defn SET-LOCAL-DOUBLE (l:Int, v:Gp) :
+    mov(a, MemPtr(stack-frame-slots-offset(), l * SIZEOF-LONG, SIZEOF-LONG), v)
+    ; double* addr = (double*)&(stack_pointer->slots[l])
+    ; *addr = v
+    false
+
+  defn LOCAL (l:Int) -> Gp :
+    mov(a, rax(), MemPtr(stack-frame-slots-offset(), l * SIZEOF-LONG, SIZEOF-LONG)) 
+    rax()
+   ; stack_pointer->slots[l]
+  defn LOCAL-FLOAT (l:Int) -> Gp :
+    mov(a, rax(), MemPtr(stack-frame-slots-offset(), l * SIZEOF-LONG, SIZEOF-LONG)) 
+    rax()
+    ; TODO: float register
+    ; float* addr = (float*)&(stack_pointer->slots[l])
+    ; *addr
+  defn LOCAL-DOUBLE (l:Int) -> Gp :
+    mov(a, rax(), MemPtr(stack-frame-slots-offset(), l * SIZEOF-LONG, SIZEOF-LONG)) 
+    rax()
+    ; TODO: double register
+    ; double* addr = (double*)&(stack_pointer->slots[l])
+    ; *addr
+
+  defn PUSH-FRAME (num-locals:Int, ret-addr:Label) :
+    debug(a, "PUSH-FRAME BEFORE %lld\n", stack-pointer())
+    add(a, stack-pointer(), SIZEOF-STACKFRAME + num-locals * SIZEOF-LONG)
+    debug(a, "PUSH-FRAME AFTER %lld\n", stack-pointer())
+    mov(a, tmp1(), ret-addr)
+    debug(a, "STORING TMP %lld\n" tmp1())
+    mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), tmp1())
+    debug(a, "PUSH-FRAME DONE\n")
+    ; stack_pointer = (StackFrame*)((char*)stack_pointer + sizeof(StackFrame) + (num_locals) * SIZEOF-LONG)
+    ; stack_pointer->returnpc = (uint64_t)(pc - instructions)
+    false
+
+  defn POP-FRAME (num-locals:Int) :
+    add(a, stack-pointer(), -1 * (SIZEOF-STACKFRAME + num-locals * SIZEOF-LONG))
+    ; stack_pointer = (StackFrame*)((char*)stack_pointer - sizeof(StackFrame) - (num_locals) * SIZEOF-LONG)
+    false
+
+  defn SAVE-STATE () :
+    mov(a, MemPtr(vmstate(), VMSTATE-HEAP-TOP-OFFSET, SIZEOF-LONG), heap-top())
+    mov(a, MemPtr(vmstate(), VMSTATE-CURRENT-STACK-OFFSET, SIZEOF-LONG), current-stack())
+    mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), stack-pointer())
+    caller-save-registers(a)
+    ; vms->heap_top = heap_top
+    ; vms->current_stack = current_stack
+    ; stk->stack_pointer = stack_pointer
+    false
+
+  defn RESTORE-STATE () :
+    mov(a, heap-top(), MemPtr(vmstate(), VMSTATE-HEAP-TOP-OFFSET, SIZEOF-LONG))
+    mov(a, heap-limit(), MemPtr(vmstate(), VMSTATE-HEAP-LIMIT-OFFSET, SIZEOF-LONG))
+    mov(a, current-stack(), MemPtr(vmstate(), VMSTATE-CURRENT-STACK-OFFSET, SIZEOF-LONG))
+    mov(a, stk(), untag-stack(a, current-stack()))
+    mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG))
+    ; mov(a, stack-limit(a), compute-stack-limit(a))
+    caller-restore-registers(a)
+    ; heap_top = vms->heap_top
+    ; heap_limit = vms->heap_limit
+    ; current_stack = vms->current_stack
+    ; stk = untag_stack(current_stack)
+    ; stack_pointer = stk->stack_pointer
+    ; stack_limit = (char*)(stk->frames) + stk->size
+    false
+
+  val INT-TAG-BITS = 0
+  val REF-TAG-BITS = 1
+  val MARKER-TAG-BITS = 2
+  val BYTE-TAG-BITS = 3
+  val CHAR-TAG-BITS = 4
+  val FLOAT-TAG-BITS = 5
+
+  val FALSE-TYPE = 0
+  val TRUE-TYPE = 1
+  val BYTE-TYPE = 2
+  val CHAR-TYPE = 3
+  val INT-TYPE = 4
+  val FLOAT-TYPE = 5
+  val STACK-TYPE = 6
+  val FN-TYPE = 7
+  val TYPE-TYPE = 8
+  val LIVENESS-TRACKER-TYPE = 9
+
+  val EXTEND-HEAP-FN = 0
+  val EXTEND-STACK-FN = 1
+  val INIT-CONSTS-FN = 2
+  val EXECUTE-TOPLEVEL-COMMAND-FN = 3
+
+  defn BOOLREF (x:Int) : (((x) << 3) + MARKER-TAG-BITS)
+
+  val SYSTEM-RETURN-STUB = -2
+
+  defn c-call (fptr:Long) :
+    push(a, r10())
+    push(a, r11())
+    mov(a, rax(), fptr)
+    call(a, rax())
+    pop(a, r11())
+    pop(a, r10())
+    
+  defn emit-ins-a (opcode:Int, value:Int|Label) :
+    switch(opcode) :
+      FNENTRY-OPCODE :
+        ; TODO: STACK OVERFLOW CHECK
+        println("A FNENTRY ?")
+        false
+      DISPATCH-OPCODE : println("A DISPATCH ?")
+      TCALL-CLOSURE-OPCODE : println("A TCALL-CLOSURE ?")
+      POP-FRAME-OPCODE :
+        ; TODO:
+        ; state->stack_pointer = (StackFrame*)((char*)state->stack_pointer - sizeof(StackFrame) - (num_locals) * SIZEOF-LONG);  
+        println("A POP-FRAME ?")
+      ENTER-STACK-OPCODE : println("A ENTER-STACK ?")
+      YIELD-OPCODE : println("A YIELD ?")
+      RETURN-OPCODE :
+        println("RETURN")
+        mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
+        jmp(a, tmp1())
+        ; int64_t retpc = stack_pointer->returnpc;
+        ; state->pc = instructions + retpc;
+        false
+      DUMP-OPCODE : println("A DUMP ?")
+      LIVE-OPCODE :
+        println("A LIVE ?")
+        ; TODO:
+        ; state->stack_pointer->liveness_map = value;
+      GOTO-OPCODE : 
+        println("A GOTO ?")
+      DISPATCH-METHOD-OPCODE : println("A DISPATCH-METHOD ?")
+      FLUSH-VM-OPCODE : println("A FLUSH-VM ?")
+      C-RSP-OPCODE : println("A C-RSP ?")
+      else : println("MISSING A OPCODE %_" % [opcode])
+
+  defn emit-ins-b (opcode:Int, x:Int, value:Int) :
+    switch(opcode) :
+      INT-NOT-OPCODE : println("B INT-NOT ?")
+      INT-NEG-OPCODE : println("B INT-NEG ?")
+      NOT-OPCODE-BYTE : println("B NOT-BYTE ?")
+      NOT-OPCODE-INT : println("B NOT-INT ?")
+      NOT-OPCODE-LONG : println("B NOT-LONG ?")
+      NEG-OPCODE-INT : println("B NEG-INT ?")
+      NEG-OPCODE-LONG : println("B NEG-LONG ?")
+      NEG-OPCODE-FLOAT : println("B NEG-FLOAT ?")
+      NEG-OPCODE-DOUBLE : println("B NEG-DOUBLE ?")
+      CONV-OPCODE-BYTE-FLOAT : println("B CONV-BYTE-FLOAT ?")
+      CONV-OPCODE-BYTE-DOUBLE : println("B CONV-BYTE-DOUBLE ?")
+      CONV-OPCODE-INT-BYTE : println("B CONV-INT-BYTE ?")
+      CONV-OPCODE-INT-FLOAT : println("B CONV-INT-FLOAT ?")
+      CONV-OPCODE-INT-DOUBLE : println("B CONV-INT-DOUBLE ?")
+      CONV-OPCODE-LONG-BYTE : println("B CONV-LONG-BYTE ?")
+      CONV-OPCODE-LONG-INT : println("B CONV-LONG-INT ?")
+      CONV-OPCODE-LONG-FLOAT : println("B CONV-LONG-FLOAT ?")
+      CONV-OPCODE-LONG-DOUBLE : println("B CONV-LONG-DOUBLE ?")
+      CONV-OPCODE-FLOAT-BYTE : println("B CONV-FLOAT-BYTE ?")
+      CONV-OPCODE-FLOAT-INT : println("B CONV-FLOAT-INT ?")
+      CONV-OPCODE-FLOAT-LONG : println("B CONV-FLOAT-LONG ?")
+      CONV-OPCODE-FLOAT-DOUBLE : println("B CONV-FLOAT-DOUBLE ?")
+      CONV-OPCODE-DOUBLE-BYTE : println("B CONV-DOUBLE-BYTE ?")
+      CONV-OPCODE-DOUBLE-INT : println("B CONV-DOUBLE-INT ?")
+      CONV-OPCODE-DOUBLE-LONG : println("B CONV-DOUBLE-LONG ?")
+      CONV-OPCODE-DOUBLE-FLOAT : println("B CONV-DOUBLE-FLOAT ?")
+      TAG-OPCODE-BYTE : println("B TAG-BYTE ?")
+      TAG-OPCODE-CHAR : println("B TAG-CHAR ?")
+      TAG-OPCODE-INT : println("B TAG-INT ?")
+      TAG-OPCODE-FLOAT : println("B TAG-FLOAT ?")
+      DETAG-OPCODE : println("B DETAG ?")
+      DEREF-OPCODE : println("B DEREF ?")
+      GC-OPCODE : println("B GC ?")
+      CLASS-NAME-OPCODE : println("B CLASS-NAME ?")
+      PRINT-STACK-TRACE-OPCODE : println("B PRINT-STACK-TRACE ?")
+      GET-REG-OPCODE :
+        println("B GET-REG")
+        mov(a, tmp1(), MemPtr(registers(), value * SIZEOF-LONG, SIZEOF-LONG))
+        SET-LOCAL(x, tmp1())
+      else : println("MISSING B OPCODE %_" % [opcode])
+  defn emit-ins-c (opcode:Int, x:Int, value:Int) :
+    switch(opcode) :
+      TCALL-OPCODE-LOCAL : println("C TCALL-LOCAL ?")
+      TCALL-OPCODE-CODE : println("C TCALL-CODE ?")
+      CALL-OPCODE-LOCAL : println("C CALL-LOCAL ?")
+      CALL-OPCODE-CODE : println("C CALL-CODE ?")
+      CALL-CLOSURE-OPCODE : println("C CALL-CLOSURE ?")
+      CALLC-OPCODE-LOCAL :
+        println("C CALLC-LOCAL")
+        val end-label = new-label(a)
+        val num-locals = x
+        PUSH-FRAME(num-locals, end-label)
+        SAVE-STATE()
+        val faddr = LOCAL(value)
+        c-trampoline(a, [faddr, registers(), registers()])
+        RESTORE-STATE()
+        mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
+        jmp(a, tmp1())
+        POP-FRAME(num-locals)
+        bind(a, end-label)
+      TYPEOF-OPCODE : println("C TYPEOF ?")
+      SET-REG-OPCODE-LOCAL : println("C SET-REG-LOCAL ?")
+      SET-REG-OPCODE-UNSIGNED :
+        println("C SET-REG-UNSIGNED")
+        mov(a, tmp1(), to-long(value))
+        mov(a, tmp2(), to-long(x))
+        debug(a, "SET-REG-UNSIGNED %llx %llx\n" tmp2() tmp1())
+        mov(a, tmp1(), to-long(value))
+        SET-REG(x, tmp1())
+        dump-memory(a, registers(), 5L)
+      SET-REG-OPCODE-WIDE : println("C SET-REG-WIDE ?")
+      SET-REG-OPCODE-CODE : println("C SET-REG-CODE ?")
+      SET-REG-OPCODE-GLOBAL : println("C SET-REG-GLOBAL ?")
+      SET-REG-OPCODE-DATA :
+        println("C SET-REG-DATA")
+        mov(a, tmp2(), MemPtr(data-offsets(), value * SIZEOF-LONG, SIZEOF-LONG)) ; data_offsets[value]
+        shl(a, tmp2(), 3)      ; 8 * data_offsets[value]
+        mov(a, tmp1(), data-mem()) ; data_mem
+        add(a, tmp1(), tmp2()) ; data_mem + 8 * data_offsets[value]
+        SET-REG(x, tmp1())
+        mov(a, tmp2(), to-long(x))
+        debug(a, "SET-REG-DATA %x %llx\n" tmp2() tmp1())
+        dump-memory(a, registers(), 5L)
+      SET-REG-OPCODE-CONST : println("C SET-REG-CONST ?")
+      SET-REG-OPCODE-UNSIGNED : println("C SET-REG-UNSIGNED ?")
+      SET-OPCODE-LOCAL : println("C SET-LOCAL ?")
+      SET-OPCODE-UNSIGNED : println("C SET-UNSIGNED ?")
+      SET-OPCODE-WIDE : println("C SET-WIDE ?")
+      SET-OPCODE-CODE : println("C SET-CODE ?")
+      SET-OPCODE-GLOBAL : println("C SET-GLOBAL ?")
+      SET-OPCODE-DATA : println("C SET-DATA ?")
+      SET-OPCODE-CONST : println("C SET-CONST ?")
+      else : println("MISSING C OPCODE %_" % [opcode])
+
+  defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Int) :
+    switch(opcode) :
+      JUMP-REG-OPCODE : println("C JUMP-REG ?")
+      INT-ADD-OPCODE : println("C INT-ADD ?")
+      INT-SUB-OPCODE : println("C INT-SUB ?")
+      INT-MUL-OPCODE : println("C INT-MUL ?")
+      INT-DIV-OPCODE : println("C INT-DIV ?")
+      INT-MOD-OPCODE : println("C INT-MOD ?")
+      INT-AND-OPCODE : println("C INT-AND ?")
+      INT-OR-OPCODE : println("C INT-OR ?")
+      INT-XOR-OPCODE : println("C INT-XOR ?")
+      INT-SHL-OPCODE : println("C INT-SHL ?")
+      INT-SHR-OPCODE : println("C INT-SHR ?")
+      INT-ASHR-OPCODE : println("C INT-ASHR ?")
+      INT-LT-OPCODE : println("C INT-LT ?")
+      INT-GT-OPCODE : println("C INT-GT ?")
+      INT-LE-OPCODE : println("C INT-LE ?")
+      INT-GE-OPCODE : println("C INT-GE ?")
+      EQ-OPCODE-REF-REF : println("C EQ-REF_REF ?")
+      EQ-OPCODE-REF : println("C EQ-REF ?")
+      EQ-OPCODE-BYTE : println("C EQ-BYTE ?")
+      EQ-OPCODE-INT : println("C EQ-INT ?")
+      EQ-OPCODE-LONG : println("C EQ-LONG ?")
+      EQ-OPCODE-FLOAT : println("C EQ-FLOAT ?")
+      EQ-OPCODE-DOUBLE : println("C EQ-DOUBLE ?")
+      NE-OPCODE-REF-REF : println("C NE-REF-REF ?")
+      NE-OPCODE-REF : println("C NE-REF ?")
+      NE-OPCODE-BYTE : println("C NE-BYTE ?")
+      NE-OPCODE-INT : println("C NE-INT ?")
+      NE-OPCODE-LONG : println("C NE-LONG ?")
+      NE-OPCODE-FLOAT : println("C NE-FLOAT ?")
+      NE-OPCODE-DOUBLE : println("C NE-DOUBLE ?")
+      ADD-OPCODE-BYTE : println("C ADD-BYTE ?")
+      ADD-OPCODE-INT : println("C ADD-INT ?")
+      ADD-OPCODE-LONG : println("C ADD-LONG ?")
+      ADD-OPCODE-FLOAT : println("C ADD-FLOAT ?")
+      ADD-OPCODE-DOUBLE : println("C ADD-DOUBLE ?")
+      SUB-OPCODE-BYTE : println("C SUB-BYTE ?")
+      SUB-OPCODE-INT : println("C SUB-INT ?")
+      SUB-OPCODE-LONG : println("C SUB-LONG ?")
+      SUB-OPCODE-FLOAT : println("C SUB-FLOAT ?")
+      SUB-OPCODE-DOUBLE : println("C SUB-DOUBLE ?")
+      MUL-OPCODE-BYTE : println("C MUL-BYTE ?")
+      MUL-OPCODE-INT : println("C MUL-INT ?")
+      MUL-OPCODE-LONG : println("C MUL-LONG ?")
+      MUL-OPCODE-FLOAT : println("C MUL-FLOAT ?")
+      MUL-OPCODE-DOUBLE : println("C MUL-DOUBLE ?")
+      DIV-OPCODE-BYTE : println("C DIV-BYTE ?")
+      DIV-OPCODE-INT : println("C DIV-INT ?")
+      DIV-OPCODE-LONG : println("C DIV-LONG ?")
+      DIV-OPCODE-FLOAT : println("C DIV-FLOAT ?")
+      DIV-OPCODE-DOUBLE : println("C DIV-DOUBLE ?")
+      MOD-OPCODE-BYTE : println("C MOD-BYTE ?")
+      MOD-OPCODE-INT : println("C MOD-INT ?")
+      MOD-OPCODE-LONG : println("C MOD-LONG ?")
+      AND-OPCODE-BYTE : println("C AND-BYTE ?")
+      AND-OPCODE-INT : println("C AND-INT ?")
+      AND-OPCODE-LONG : println("C AND-LONG ?")
+      OR-OPCODE-BYTE : println("C OR-BYTE ?")
+      OR-OPCODE-INT : println("C OR-INT ?")
+      OR-OPCODE-LONG : println("C OR-LONG ?")
+      XOR-OPCODE-BYTE : println("C XOR-BYTE ?")
+      XOR-OPCODE-INT : println("C XOR-INT ?")
+      XOR-OPCODE-LONG : println("C XOR-LONG ?")
+      SHL-OPCODE-BYTE : println("C SHL-BYTE ?")
+      SHL-OPCODE-INT : println("C SHL-INT ?")
+      SHL-OPCODE-LONG : println("C SHL-LONG ?")
+      SHR-OPCODE-BYTE : println("C SHR-BYTE ?")
+      SHR-OPCODE-INT : println("C SHR-INT ?")
+      SHR-OPCODE-LONG : println("C SHR-LONG ?")
+      ASHR-OPCODE-INT : println("C ASHR-INT ?")
+      ASHR-OPCODE-LONG : println("C ASHR-LONG ?")
+      LT-OPCODE-INT : println("C LT-INT ?")
+      LT-OPCODE-LONG : println("C LT-LONG ?")
+      LT-OPCODE-FLOAT : println("C LT-FLOAT ?")
+      LT-OPCODE-DOUBLE : println("C LT-DOUBLE ?")
+      GT-OPCODE-INT : println("C GT-INT ?")
+      GT-OPCODE-LONG : println("C GT-LONG ?")
+      GT-OPCODE-FLOAT : println("C GT-FLOAT ?")
+      GT-OPCODE-DOUBLE : println("C GT-DOUBLE ?")
+      LE-OPCODE-INT : println("C LE-INT ?")
+      LE-OPCODE-LONG : println("C LE-LONG ?")
+      LE-OPCODE-FLOAT : println("C LE-FLOAT ?")
+      LE-OPCODE-DOUBLE : println("C LE-DOUBLE ?")
+      GE-OPCODE-INT : println("C GE-INT ?")
+      GE-OPCODE-LONG : println("C GE-LONG ?")
+      GE-OPCODE-FLOAT : println("C GE-FLOAT ?")
+      GE-OPCODE-DOUBLE : println("C GE-DOUBLE ?")
+      ULT-OPCODE-BYTE : println("C ULT-BYTE ?")
+      ULT-OPCODE-INT : println("C ULT-INT ?")
+      ULT-OPCODE-LONG : println("C ULT-LONG ?")
+      ULE-OPCODE-BYTE : println("C ULE-BYTE ?")
+      ULE-OPCODE-INT : println("C ULE-INT ?")
+      ULE-OPCODE-LONG : println("C ULE-LONG ?")
+      UGT-OPCODE-BYTE : println("C UGT-BYTE ?")
+      UGT-OPCODE-INT : println("C UGT-INT ?")
+      UGT-OPCODE-LONG : println("C UGT-LONG ?")
+      UGE-OPCODE-BYTE : println("C UGE-BYTE ?")
+      UGE-OPCODE-INT : println("C UGE-INT ?")
+      UGE-OPCODE-LONG : println("C UGE-LONG ?")
+      RESERVE-OPCODE-LOCAL : println("C RESERVE-LOCAL ?")
+      RESERVE-OPCODE-CONST : println("C RESERVE-CONST ?")
+      ALLOC-OPCODE-LOCAL : println("C ALLOC-LOCAL ?")
+      ALLOC-OPCODE-CONST : println("C ALLOC-CONST ?")
+      else : println("MISSING C OPCODE %_" % [opcode])
+
+  defn emit-ins-d (opcode:Int, x:Int, value:Long) :
+    switch(opcode) :
+      CALLC-OPCODE-WIDE : 
+        println("D CALLC-WIDE")
+        debug(a, "CALLC-WIDE\n")
+        val end-label = new-label(a)
+        val faddr = value
+        val num_locals = x
+        debug(a, "PUSH-FRAME\n")
+        PUSH-FRAME(num_locals, end-label)
+        debug(a, "SAVE-STATE\n")
+        SAVE-STATE()
+        debug(a, "C-TRAMPOLINE\n")
+        mov(a, tmp1(), faddr)
+        c-trampoline(a, [tmp1(), registers(), registers()])
+        RESTORE-STATE()
+        mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
+        jmp(a, tmp1())
+        POP-FRAME(num_locals)
+        bind(a, end-label)
+      SET-REG-OPCODE-LOCAL : println("D SET-REG-LOCAL ?")
+      SET-REG-OPCODE-UNSIGNED : println("D SET-REG-UNSIGNED ?")
+      SET-REG-OPCODE-WIDE : println("D SET-REG-WIDE ?")
+      SET-REG-OPCODE-CODE : println("D SET-REG-CODE ?")
+      SET-REG-OPCODE-GLOBAL : println("D SET-REG-GLOBAL ?")
+      SET-REG-OPCODE-DATA : println("D SET-REG-DATA ?")
+      SET-REG-OPCODE-CONST : println("D SET-REG-CONST ?")
+      SET-REG-OPCODE-UNSIGNED : println("D SET-REG-UNSIGNED ?")
+      SET-OPCODE-LOCAL : println("D SET-LOCAL ?")
+      SET-OPCODE-UNSIGNED : println("D SET-UNSIGNED ?")
+      SET-OPCODE-WIDE : println("D SET-WIDE ?")
+      SET-OPCODE-CODE : println("D SET-CODE ?")
+      SET-OPCODE-GLOBAL : println("D SET-GLOBAL ?")
+      SET-OPCODE-DATA : println("D SET-DATA ?")
+      SET-OPCODE-CONST : println("D SET-CONST ?")
+      SET-OPCODE-UNSIGNED : println("D SET-UNSIGNED ?")
+      else : println("MISSING D OPCODE %_" % [opcode])
+
+  defn emit-ins-e (opcode:Int, x:Int, y:Int, z:Int, value:Int) :
+    switch(opcode) :
+      STORE-OPCODE-1 : println("E STORE-1 ?")
+      STORE-OPCODE-4 : println("E STORE-4 ?")
+      STORE-OPCODE-8 : println("E STORE-8 ?")
+      STORE-OPCODE-1-VAR-OFFSET : println("E STORE-1-VAR-OFFSET ?")
+      STORE-OPCODE-4-VAR-OFFSET : println("E STORE-4-VAR-OFFSET ?")
+      STORE-OPCODE-8-VAR-OFFSET : println("E STORE-8-VAR-OFFSET ?")
+      LOAD-OPCODE-1 : 
+        println("D LOAD-1")
+        mov(a, tmp2(), MemPtr(LOCAL(y), value * SIZEOF-LONG, 1))
+        SET-LOCAL(x, tmp2())
+      LOAD-OPCODE-4 : 
+        println("D LOAD-4")
+        mov(a, tmp2(), MemPtr(LOCAL(y), value * SIZEOF-LONG, 4))
+        SET-LOCAL(x, tmp2())
+      LOAD-OPCODE-8 :
+        println("D LOAD-8")
+        mov(a, tmp2(), MemPtr(LOCAL(y), value * SIZEOF-LONG, 8))
+        SET-LOCAL(x, tmp2())
+      LOAD-OPCODE-1-VAR-OFFSET : println("E LOAD-1-VAR-OFFSET ?")
+      LOAD-OPCODE-4-VAR-OFFSET : println("E LOAD-4-VAR-OFFSET ?")
+      LOAD-OPCODE-8-VAR-OFFSET : println("E LOAD-8-VAR-OFFSET ?")
+      else : println("MISSING E OPCODE %_" % [opcode])
+
+  defn emit-ins-f (opcode:Int, x:Int, y:Int, n1:Label, n2:Label) :
+    switch(opcode) :
+      JUMP-TAGBITS-OPCODE : println("F JUMP-TAGBITS ?")
+      JUMP-TAGWORD-OPCODE : println("F JUMP-TAGWORD ?")
+      JUMP-SET-OPCODE : println("F JUMP-SET ?")
+      JUMP-INT-LT-OPCODE : println("F JUMP-INT-LT ?")
+      JUMP-INT-GT-OPCODE : println("F JUMP-INT-GT ?")
+      JUMP-INT-LE-OPCODE : println("F JUMP-INT-LE ?")
+      JUMP-INT-GE-OPCODE : println("F JUMP-INT-GE ?")
+      JUMP-EQ-OPCODE-REF : println("F JUMP-EQ-REF ?")
+      JUMP-EQ-OPCODE-BYTE : println("F JUMP-EQ-BYTE ?")
+      JUMP-EQ-OPCODE-INT : println("F JUMP-EQ-INT ?")
+      JUMP-EQ-OPCODE-LONG : println("F JUMP-EQ-LONG ?")
+      JUMP-EQ-OPCODE-FLOAT : println("F JUMP-EQ-FLOAT ?")
+      JUMP-EQ-OPCODE-DOUBLE : println("F JUMP-EQ-DOUBLE ?")
+      JUMP-NE-OPCODE-REF : println("F JUMP-NE-REF ?")
+      JUMP-NE-OPCODE-BYTE : println("F JUMP-NE-BYTE ?")
+      JUMP-NE-OPCODE-INT : println("F JUMP-NE-INT ?")
+      JUMP-NE-OPCODE-LONG : println("F JUMP-NE-LONG ?")
+      JUMP-NE-OPCODE-FLOAT : println("F JUMP-NE-FLOAT ?")
+      JUMP-NE-OPCODE-DOUBLE : println("F JUMP-NE-DOUBLE ?")
+      JUMP-LT-OPCODE-INT : println("F JUMP-LT-INT ?")
+      JUMP-LT-OPCODE-LONG : println("F JUMP-LT-LONG ?")
+      JUMP-LT-OPCODE-FLOAT : println("F JUMP-LT-FLOAT ?")
+      JUMP-LT-OPCODE-DOUBLE : println("F JUMP-LT-DOUBLE ?")
+      JUMP-GT-OPCODE-INT : println("F JUMP-GT-INT ?")
+      JUMP-GT-OPCODE-LONG : println("F JUMP-GT-LONG ?")
+      JUMP-GT-OPCODE-FLOAT : println("F JUMP-GT-FLOAT ?")
+      JUMP-GT-OPCODE-DOUBLE : println("F JUMP-GT-DOUBLE ?")
+      JUMP-LE-OPCODE-INT : println("F JUMP-LE-INT ?")
+      JUMP-LE-OPCODE-LONG : println("F JUMP-LE-LONG ?")
+      JUMP-LE-OPCODE-FLOAT : println("F JUMP-LE-FLOAT ?")
+      JUMP-LE-OPCODE-DOUBLE : println("F JUMP-LE-DOUBLE ?")
+      JUMP-GE-OPCODE-INT : println("F JUMP-GE-INT ?")
+      JUMP-GE-OPCODE-LONG : println("F JUMP-GE-LONG ?")
+      JUMP-GE-OPCODE-FLOAT : println("F JUMP-GE-FLOAT ?")
+      JUMP-GE-OPCODE-DOUBLE : println("F JUMP-GE-DOUBLE ?")
+      JUMP-ULT-OPCODE-BYTE : println("F JUMP-ULT-BYTE ?")
+      JUMP-ULT-OPCODE-INT : println("F JUMP-ULT-INT ?")
+      JUMP-ULT-OPCODE-LONG : println("F JUMP-ULT-LONG ?")
+      JUMP-ULE-OPCODE-BYTE : println("F JUMP-ULE-BYTE ?")
+      JUMP-ULE-OPCODE-INT : println("F JUMP-ULE-INT ?")
+      JUMP-ULE-OPCODE-LONG : println("F JUMP-ULE-LONG ?")
+      JUMP-UGT-OPCODE-BYTE : println("F JUMP-UGT-BYTE ?")
+      JUMP-UGT-OPCODE-INT : println("F JUMP-UGT-INT ?")
+      JUMP-UGT-OPCODE-LONG : println("F JUMP-UGT-LONG ?")
+      JUMP-UGE-OPCODE-BYTE : println("F JUMP-UGE-BYTE ?")
+      JUMP-UGE-OPCODE-INT : println("F JUMP-UGE-INT ?")
+      JUMP-UGE-OPCODE-LONG : println("F JUMP-UGE-LONG ?")
+      else : println("MISSING F OPCODE %_" % [opcode])
+
+  defn emit-ins-targets (dests:Tuple<Label>) :
+    ; TODO:
+    ; put(buffer, length(dests))
+    ; for d in dests do : put(buffer, d)
+    false
+
+  ;Encode multivarity functions
+  defn encode (multi:VMMultifn) :
+    ;TODO:
+    ; ;Declare function positions
+    ; var functions
+    ; ;Emit branch instructions
+    ; for (entry in funcs(multi), i in 0 to false) do :
+    ;   val arity = key(entry)
+    ;   val offset = functions[i] - buffer-pos()
+    ;   emit-ins-c(JUMP-REG-OPCODE, arg(multi), arity, offset)
+    ; ;Emit default branch
+    ; encode(default(multi))
+    ; ;Emit other branches, and compute their positions
+    ; functions = for entry in funcs(multi) map :
+    ;   encode(value(entry))
+    Func(rt) ; TODO: make real
+
+  defn encode (func:VMFunc) -> Func :
+    ;==================================================
+    ;============== Fundamental State =================
+    ;==================================================
+    ;Reserve extra 3 locals for temporary moving
+    val max-local = maximum(-1, seq(local, defs(func)))
+    val num-locals = max-local + 1 + 3
+
+    ;Definitions
+    val deftable = to-inttable(id, defs(func))
+
+    ;Labels
+    val label-table = IntTable<Label>()
+    val used-labels = to-intset(seq(n, filter-by<LabelIns>(ins(func))))
+    val label-counter = to-seq(0 to false)
+
+    ;==================================================
+    ;============== Overall Algorithm =================
+    ;==================================================
+    defn driver () :
+      emit-prelude()
+      do(emit-ins, ins(func))
+
+    ;Enter a function
+    defn emit-prelude () :
+      ;Enter function
+      emit-ins-a(FNENTRY-OPCODE, num-locals)
+      ;Retrieve arguments
+      get-regs(args(func))
+
+    ;Encode a match statement that can be redefined later.
+    defn emit-non-final-match (ys:Tuple<VMImm>, bs:Tuple<VMBranch>, default:Int) :
+      ;Retrieve the format index of this match statement.
+      val [types, dests] = split-types-and-dests(bs)
+      val format = match-format(resolver, types)
+
+      ;Push arguments onto registers
+      set-regs(ys)
+
+      ;One target for default and then each branch for dispatch.
+      val num-targets = 1 + length(bs)
+      val targets = jump-offsets([default], dests)
+      emit-ins-a(DISPATCH-OPCODE, format)
+      emit-ins-targets(targets)
+
+    ;Encode a match statement that cannot be redefined later.
+    defn emit-final-match (ys:Tuple<VMImm>, bs:Tuple<VMBranch>, default-label:Int) :
+      defn compute-dag () :
+        val branch-table = BranchTable(to-branches(seq(types,bs), {[_]}))
+        compute-dispatch-dag(branch-table, false)
+
+      defn emit-dag (dag:Dag) :
+        ;Create labels for all entries
+        val labels = map(gen-label{}, entries(dag))
+        ;Convert a value into a label
+        defn to-label (x:Int|Soln) :
+          match(x) :
+            (x:Int) : labels[x]
+            (x:UniqueSoln) : n(bs[index(x)])
+            (x:NoSoln) : default-label
+        ;Compile a given entry
+        defn emit-entry (e:DagEntry) :
+          if empty?(entries(e)) :
+            emit-ins(GotoIns(to-label(default(e))))
+          else :
+            within (entry, last?) = expanded-entries(e) :
+              val n1 = to-label(value(entry))
+              val n2 = to-label(default(e)) when last? else gen-label()
+              emit-ins(Branch1Ins(n1, n2, InstanceofOp(SingleType(key(entry))), ys[depth(e)]))
+              emit-ins(LabelIns(n2)) when not last?
+        ;Compile all entries
+        for (e in entries(dag), l in labels) do :
+          emit-ins(LabelIns(l))
+          emit-entry(e)
+
+      ;Expand the given entries and compute whether it is the last entry
+      defn expanded-entries (f:(KeyValue<Int,Int|Soln>, True|False) -> ?, e:DagEntry) :
+        val es = for e in entries(e) seq-cat :
+          for v in values(key(e)) seq :
+            v => value(e)
+        let loop () :
+          val e = next(es)
+          f(e, empty?(es))
+          loop() when not empty?(es)
+
+      ;Launch
+      emit-dag(compute-dag())
+
+    ;Emit instanceof operation
+    defn emit-instanceof (n1:Int, n2:Int, x:VMImm, type:TypeSet) :
+      if (type is SingleType) and type-is-final?(type) :
+        defn driver () :
+          val tag = /type(type as SingleType)
+          switch(tag) :
+            BYTE-TYPE : compare-tag-bits(BYTE-TYPE)
+            CHAR-TYPE : compare-tag-bits(CHAR-TYPE)
+            INT-TYPE : compare-tag-bits(INT-TYPE)
+            FLOAT-TYPE :  compare-tag-bits(FLOAT-TYPE)
+            else :
+              if marker?(resolver, tag) : compare-marker(tag)
+              else : compare-tag-word(tag)
+        defn compare-tag-bits (typeid:Int) :
+          val bits = tagbits(resolver,typeid)
+          emit-ins-f(JUMP-TAGBITS-OPCODE, to-local(x,0), bits, jump-offset(n1), jump-offset(n2))
+        defn compare-marker (typeid:Int) :
+          emit-ins(Branch2Ins(n1, n2, EqOp(), x, Marker(typeid)))
+        defn compare-tag-word (typeid:Int) :
+          val typetag-local = to-local(NumConst(typeid), 0)
+          val x-local = to-local(x,1)
+          emit-ins-f(JUMP-TAGWORD-OPCODE, x-local, typetag-local, jump-offset(n1), jump-offset(n2))
+        driver()
+      else :
+        ;Retrieve format
+        val format = match-format(resolver, [[type]])
+        ;Push argument into register
+        set-reg(0, x)
+        ;Emit dispatch instruction
+        ;Two targets, match success and default
+        val num-targets = 2
+        val targets = jump-offsets([n2, n1])
+        emit-ins-a(DISPATCH-OPCODE, format)
+        emit-ins-targets(targets)
+
+    defn maybe-add-new-label (n:Int) -> Label :
+      if not key?(label-table, n) :
+        label-table[n] = new-label(a)
+      label-table[n]
+      
+    ;Encode each instruction
+    defn emit-ins (ins:VMIns) :
+      match(ins) :
+        (ins:LabelIns) :
+          val lab = maybe-add-new-label(n(ins))
+          bind(a, lab)
+        (ins:UnreachableIns) :
+          false
+        (ins:TCallIns) :
+          set-regs(ys(ins))
+          emit-ins-c(tcall-opcode(f(ins)), 0, to-function-local(f(ins)))
+        (ins:TCallClosureIns) :
+          set-regs(ys(ins))
+          emit-ins-a(TCALL-CLOSURE-OPCODE, to-local(f(ins), 0))
+        (ins:CallIns) :
+          set-regs(ys(ins))
+          emit-ins-c(call-opcode(f(ins)), num-locals, to-function-local(f(ins)))
+          record-info(info(ins))
+          emit-ins-a(POP-FRAME-OPCODE, num-locals)
+          get-regs(xs(ins))
+        (ins:CallClosureIns) :
+          set-regs(ys(ins))
+          emit-ins-c(CALL-CLOSURE-OPCODE, num-locals, to-local(f(ins), 0))
+          record-info(info(ins))
+          emit-ins-a(POP-FRAME-OPCODE, num-locals)
+          get-regs(xs(ins))
+        (ins:CallCIns) :
+          ;Convert a VMType into an ArgType for call-record analysis
+          defn to-arg-type (t:VMType) :
+            match(t) :
+              (t:VMFloat|VMDouble) : RealArg()
+              (t) : IntArg()
+          ;Compute C calling convention
+          val records = callc-records(ytypes, xtype, backend) where :
+            val ytypes = map(to-arg-type, map(imm-type, ys(ins)))
+            val xtypes = map(to-arg-type, map(imm-type, xs(ins)))
+            val xtype = IntArg() when empty?(xtypes) else xtypes[0]
+          ;Compute register locations
+          var layout-counter:Int = 0
+          defn next-index (n:Int) :
+            val c = layout-counter
+            layout-counter = layout-counter + n
+            c
+          val num-stack-args-index = next-index(1)
+          val stack-args-index = next-index(num-mem-args(records))
+          val num-float-args-index = next-index(1)
+          val float-args-index = next-index(num-real-args(records))
+          val num-int-args-index = next-index(1)
+          val int-args-index = next-index(num-int-args(records))
+          val num-floats-in-call-index = next-index(1)
+          ;Given the location that the argument should be stored,
+          ;return the index in the register buffer that we should
+          ;store the argument that is desired by the trampoline code.
+          defn register-index (l:CallLoc) -> Int :
+            match(l) :
+              (l:RegLoc) : num-floats-in-call-index - 1 - index(l)
+              (l:FRegLoc) : num-int-args-index - 1 - index(l)
+              (l:MemLoc) : num-float-args-index - 1 - index(l)
+          ;Assign registers
+          for arg in args(records) do :
+            val r = register-index(loc(arg))
+            val v = value(arg) as StdArg|ShadowArg
+            val y = ys(ins)[index(v)]
+            set-reg(r, y)
+          ;Set number of arguments
+          set-reg(num-stack-args-index, NumConst(num-mem-args(records)))
+          set-reg(num-float-args-index, NumConst(num-real-args(records)))
+          set-reg(num-int-args-index, NumConst(num-int-args(records) + 1))
+          set-reg(num-floats-in-call-index, NumConst(num-real-args(records)))
+          ;Call function
+          match(f(ins)) :
+            (f:Local) :
+              emit-ins-c(CALLC-OPCODE-LOCAL, num-locals, slot(f))
+            (f:ExternId) :
+              val address = to-bits(f) as Long
+              emit-ins-d(CALLC-OPCODE-WIDE, num-locals, address)
+          record-info(info(ins))
+          ;Retrieve return registers
+          defn return-register-index (l:CallLoc) :
+            match(l) :
+              (l:RegLoc) : 0
+              (l:FRegLoc) : 1
+          if not empty?(xs(ins)) :
+            val x = xs(ins)[0]
+            get-reg(x, return-register-index(return(records)))
+        (ins:YieldIns) :
+          set-regs(ys(ins))
+          val opcode = ENTER-STACK-OPCODE when enter?(ins) else YIELD-OPCODE
+          emit-ins-a(opcode, to-local(f(ins), 0))
+          record-info(info(ins))
+          get-regs(xs(ins))
+        (ins:ReturnIns) :
+          set-regs(xs(ins))
+          emit-ins-a(RETURN-OPCODE, 0)
+        (ins:DumpIns) :
+          for x in xs(ins) do :
+            emit-ins-a(DUMP-OPCODE, slot(x))
+        (ins:RecordLiveIns) :
+          val live-map = liveness-map(resolver, map(slot, live(ins)), num-locals)
+          emit-ins-a(LIVE-OPCODE, live-map)
+        (ins:StoreIns) :
+          val code = store-opcode(y(ins), imm-type(z(ins)))
+          val offset* = match(imm-type(x(ins))) :
+            (xt:VMRef) : offset(ins) - ref-offset(resolver) + object-header-size(resolver)
+            (xt) : offset(ins)
+          val x* = to-local(x(ins),0)
+          val z* = to-local(z(ins),1)
+          val y* = match(y(ins)) :
+            (y:VMImm) : to-local(y,2)
+            (y:False) : 0
+          emit-ins-e(code, x*, y*, z*, offset*)
+        (ins:LoadIns) :
+          val code = load-opcode(z(ins), imm-type(x(ins)))
+          val offset* = match(imm-type(y(ins))) :
+            (yt:VMRef) : offset(ins) - ref-offset(resolver) + object-header-size(resolver)
+            (yt) : offset(ins)
+          val y* = to-local(y(ins),0)
+          val z* = match(z(ins)) :
+            (z:VMImm) : to-local(z,1)
+            (z:False) : 0
+          emit-ins-e(code, slot(x(ins)), y*, z*, offset*)
+        (ins:Op0Ins) :
+          val code = op0-opcode(op(ins))
+          emit-ins-a(code, slot(x(ins)))
+        (ins:Op1Ins) :
+          match(op(ins)) :
+            (op:InstanceofOp) :
+              ;Push argument into register
+              set-reg(0, y(ins))
+              val format = match-format(resolver, [[type(op)]])
+              ;Emit typeof instruction
+              emit-ins-c(TYPEOF-OPCODE, slot(x(ins)), format)
+            (op) :
+              val opcode = op1-opcode(op, imm-type(x(ins)), imm-type(y(ins)))
+              match(opcode:Int) :
+                val x* = slot(x(ins))
+                val y* = to-local(y(ins), 0)
+                emit-ins-b(opcode, x*, y*)
+              else :
+                set-local(slot(x(ins)), y(ins))
+        (ins:Op2Ins) :
+          val opcode = op2-opcode(op(ins), imm-type(x(ins)), imm-type(y(ins)))
+          val x* = slot(x(ins))
+          val y* = to-local(y(ins), 0)
+          val z* = to-local(z(ins), 1)
+          emit-ins-c(opcode, x*, y*, z*)
+        (ins:GotoIns) :
+          emit-ins-a(GOTO-OPCODE, jump-offset(n(ins)))
+        (ins:Branch1Ins) :
+          match(op(ins)) :
+            (op:InstanceofOp) :
+              emit-instanceof(n1(ins), n2(ins), x(ins), type(op))
+            (op:False) :
+              emit-ins-f(JUMP-SET-OPCODE, to-local(x(ins), 0), 0, jump-offset(n1(ins)), jump-offset(n2(ins)))
+        (ins:Branch2Ins) :
+          val code = branch2-opcode(op(ins), imm-type(x(ins)))
+          val x* = to-local(x(ins), 0)
+          val y* = to-local(y(ins), 1)
+          emit-ins-f(code, x*, y*, jump-offset(n1(ins)), jump-offset(n2(ins)))
+        (ins:AllocIns) :
+          if all?({_ is NumConst}, sizes(ins)) :
+            val num-obj = length(sizes(ins))
+            val obj-sizes = for s in sizes(ins) map :
+              object-size-on-heap(resolver, value(s as NumConst) as Int)
+            ;Big sizes don't fit in instruction encoding
+            val sum-of-sizes = object-size(num-obj, sum(obj-sizes))
+            if sum-of-sizes >= 1024 :
+              val size-local = to-local(NumConst(sum-of-sizes),0)
+              emit-ins-c(RESERVE-OPCODE-LOCAL, 3, num-locals, size-local)
+            else :
+              emit-ins-c(RESERVE-OPCODE-CONST, 3, num-locals, sum-of-sizes)
+            record-info(info(ins))
+            emit-ins-a(POP-FRAME-OPCODE, num-locals)
+            for (x in xs(ins), t in types(ins), sz in obj-sizes) do :
+              ;Big object doesn't fit in instruction encoding
+              if sz >= 1024 :
+                val size-local = to-local(NumConst(sz),0)
+                emit-ins-c(ALLOC-OPCODE-LOCAL, slot(x), size-local, t)
+              else :
+                emit-ins-c(ALLOC-OPCODE-CONST, slot(x), sz, t)
+          else:
+            fatal("Multiple variable-sized allocations.") when length(sizes(ins)) > 1
+            val x = xs(ins)[0]
+            val type = types(ins)[0]
+            val size = to-local(sizes(ins)[0], 0)
+            emit-ins-c(RESERVE-OPCODE-LOCAL, 3, num-locals, size)
+            record-info(info(ins))
+            emit-ins-a(POP-FRAME-OPCODE, num-locals)
+            emit-ins-c(ALLOC-OPCODE-LOCAL, slot(x), size, type)
+        (ins:DispatchIns) :
+          ;Push arguments onto registers
+          set-regs(ys(ins))
+          val [types, dests] = split-types-and-dests(branches(ins))
+          val format = dispatch-format(resolver, types)
+          ;Two targets for default and amb and then each branch for dispatch.
+          val num-targets = 2 + length(branches(ins))
+          val targets = jump-offsets([default(ins), amb(ins)], dests)
+          emit-ins-a(DISPATCH-OPCODE, format)
+          emit-ins-targets(targets)
+        (ins:MatchIns) :
+          if all?(branch-is-final?, branches(ins)) :
+            emit-final-match(ys(ins), branches(ins), default(ins))
+          else :
+            emit-non-final-match(ys(ins), branches(ins), default(ins))
+        (ins:MethodDispatchIns) :
+          ;Push arguments onto registers
+          set-regs(cat(ys(ins), zs(ins)))
+          ;Retrieve format
+          val format = method-format(resolver, multi(ins), length(ys(ins)), length(zs(ins)))
+          ;Only two targets for default and amb
+          val num-targets = 2
+          val targets = jump-offsets([default(ins), amb(ins)])
+          emit-ins-a(DISPATCH-METHOD-OPCODE, format)
+          emit-ins-targets(targets)
+        (ins:SetIns) :
+          set-local(slot(x(ins)), y(ins))
+
+    ;==================================================
+    ;============= Immediate Utilities ================
+    ;==================================================
+    ;Retrieve type of immediate
+    defn imm-type (x:VMImm) :
+      match(x:Local) : type(deftable[index(x)])
+      else : type(x)
+    defn imm-type (x:VMType) :
+      x
+
+    ;Use deftable to retrieve the slot of a local
+    defn slot (x:Local) :
+      local(deftable[index(x)])
+
+    ;==================================================
+    ;============= Label Utilities ====================
+    ;==================================================
+    ;Create mapping from label ID to position
+    defn jump-offset (n:Int) -> Label :
+      maybe-add-new-label(n)
+    defn jump-offsets (xs:Seqable<Int>) -> Tuple<Label> :
+      to-tuple(seq(jump-offset, xs))
+    defn jump-offsets (xs:Seqable<Int>, ys:Seqable<Int>) -> Tuple<Label> :
+      jump-offsets(cat(xs,ys))
+
+    ;Generate new unique label
+    defn* gen-label () :
+      val l = next(label-counter)
+      gen-label() when used-labels[l] else l
+
+    ;==================================================
+    ;============= Compilation Utilities ==============
+    ;==================================================
+    ;Retrieve the corresponding bits for the given immediate
+    defn to-bits (y:VMImm) -> Int|Long :
+      match(y) :
+        (y:Local) : slot(y)
+        (y:NumConst) :
+          match(value(y)) :
+            (v:Char) : to-int(v)
+            (v:Byte) : to-int(v)
+            (v:Int) : v
+            (v:Long) : v
+            (v:Float) : bits(v)
+            (v:Double) : bits(v)
+        (y:Marker) : marker(resolver, typeid(y))
+        (y:Tag) : typeid(y)
+        (y:VoidMarker) : void-marker(resolver)
+        (y:CodeId) : id(y)
+        (y:ExternId) : extern-address(id(y))
+        (y:GlobalId) : id(y)
+        (y:DataId) : id(y)
+        (y:ConstId) : id(y)
+
+    ;Set register
+    defn set-reg (i:Int, y:VMImm) :
+      match(to-bits(y)) :
+        (v:Int) : emit-ins-c(set-reg-opcode(y), i, v)
+        (v:Long) : emit-ins-d(set-reg-opcode(y), i, v)
+    defn set-regs (ys:Seqable<VMImm>) :
+      do(set-reg, 0 to false, ys)
+    defn get-reg (x:Local|VMType, i:Int) :
+      match(x:Local) :
+        emit-ins-b(GET-REG-OPCODE, slot(x), i)
+    defn get-regs (xs:Seqable<Local|VMType>) :
+      do(get-reg, xs, 0 to false)
+
+    ;Set local
+    defn set-local (x:Int, y:VMImm) :
+      match(to-bits(y)) :
+        (v:Int) : emit-ins-c(set-opcode(y), x, v)
+        (v:Long) : emit-ins-d(set-opcode(y), x, v)
+
+    ;Put immediate in temporary local if not a local
+    defn to-local (x:VMImm, num:Int) :
+      match(x:Local) :
+        slot(x)
+      else :
+        val index = max-local + num + 1
+        set-local(index, x)
+        index
+
+    ;Number of words needed to hold immediate in local
+    defn words-for-to-local (x:VMImm) :
+      match(x:Local) :
+        0
+      else :
+        match(to-bits(x)) :
+          (v:Int) : 2
+          (v:Long) : 3
+
+    ;Put immediate in register if not a function immediate
+    defn to-function-local (f:VMImm) :
+      match(f) :
+        (f:CodeId) : id(f)
+        (f) : to-local(f, 0)
+
+    ;==================================================
+    ;===================== Launch =====================
+    ;==================================================
+    driver()
+    add(rt, code)
+
+  val f = encode(func as VMMultifn|VMFunc)
+  EncodedFunction(f, fileinfo-table)
+
+;============================================================
+;======================= Opcodes ============================
+;============================================================
+
+val SET-OPCODE-LOCAL = 0
+val SET-OPCODE-UNSIGNED = 1
+val SET-OPCODE-SIGNED = 2
+val SET-OPCODE-CODE = 3
+val SET-OPCODE-GLOBAL = 5
+val SET-OPCODE-DATA = 6
+val SET-OPCODE-CONST = 7
+val SET-OPCODE-WIDE = 8
+val SET-REG-OPCODE-LOCAL = 9
+val SET-REG-OPCODE-UNSIGNED = 10
+val SET-REG-OPCODE-SIGNED = 11
+val SET-REG-OPCODE-CODE = 12
+val SET-REG-OPCODE-GLOBAL = 14
+val SET-REG-OPCODE-DATA = 15
+val SET-REG-OPCODE-CONST = 16
+val SET-REG-OPCODE-WIDE = 17
+val GET-REG-OPCODE = 18
+val CALL-OPCODE-LOCAL = 19
+val CALL-OPCODE-CODE = 20
+val CALL-CLOSURE-OPCODE = 22
+val TCALL-OPCODE-LOCAL = 23
+val TCALL-OPCODE-CODE = 24
+val TCALL-CLOSURE-OPCODE = 26
+val CALLC-OPCODE-LOCAL = 27
+val CALLC-OPCODE-WIDE = 28
+val POP-FRAME-OPCODE = 30
+val LIVE-OPCODE = 31
+val YIELD-OPCODE = 32
+val RETURN-OPCODE = 33
+val DUMP-OPCODE = 34
+;2-arity operations
+val INT-ADD-OPCODE = 35
+val INT-SUB-OPCODE = 36
+val INT-MUL-OPCODE = 37
+val INT-DIV-OPCODE = 38
+val INT-MOD-OPCODE = 39
+val INT-AND-OPCODE = 40
+val INT-OR-OPCODE = 41
+val INT-XOR-OPCODE = 42
+val INT-SHL-OPCODE = 43
+val INT-SHR-OPCODE = 44
+val INT-ASHR-OPCODE = 45
+val INT-LT-OPCODE = 46
+val INT-GT-OPCODE = 47
+val INT-LE-OPCODE = 48
+val INT-GE-OPCODE = 49
+val EQ-OPCODE-REF-REF = 50
+val EQ-OPCODE-REF = 51
+val EQ-OPCODE-BYTE = 52
+val EQ-OPCODE-INT = 53
+val EQ-OPCODE-LONG = 54
+val EQ-OPCODE-FLOAT = 55
+val EQ-OPCODE-DOUBLE = 56
+val NE-OPCODE-REF-REF = 57
+val NE-OPCODE-REF = 58
+val NE-OPCODE-BYTE = 59
+val NE-OPCODE-INT = 60
+val NE-OPCODE-LONG = 61
+val NE-OPCODE-FLOAT = 62
+val NE-OPCODE-DOUBLE = 63
+val ADD-OPCODE-BYTE = 64
+val ADD-OPCODE-INT = 65
+val ADD-OPCODE-LONG = 66
+val ADD-OPCODE-FLOAT = 67
+val ADD-OPCODE-DOUBLE = 68
+val SUB-OPCODE-BYTE = 69
+val SUB-OPCODE-INT = 70
+val SUB-OPCODE-LONG = 71
+val SUB-OPCODE-FLOAT = 72
+val SUB-OPCODE-DOUBLE = 73
+val MUL-OPCODE-BYTE = 74
+val MUL-OPCODE-INT = 75
+val MUL-OPCODE-LONG = 76
+val MUL-OPCODE-FLOAT = 77
+val MUL-OPCODE-DOUBLE = 78
+val DIV-OPCODE-BYTE = 79
+val DIV-OPCODE-INT = 80
+val DIV-OPCODE-LONG = 81
+val DIV-OPCODE-FLOAT = 82
+val DIV-OPCODE-DOUBLE = 83
+val MOD-OPCODE-BYTE = 84
+val MOD-OPCODE-INT = 85
+val MOD-OPCODE-LONG = 86
+val AND-OPCODE-BYTE = 87
+val AND-OPCODE-INT = 88
+val AND-OPCODE-LONG = 89
+val OR-OPCODE-BYTE = 90
+val OR-OPCODE-INT = 91
+val OR-OPCODE-LONG = 92
+val XOR-OPCODE-BYTE = 93
+val XOR-OPCODE-INT = 94
+val XOR-OPCODE-LONG = 95
+val SHL-OPCODE-BYTE = 96
+val SHL-OPCODE-INT = 97
+val SHL-OPCODE-LONG = 98
+val SHR-OPCODE-BYTE = 99
+val SHR-OPCODE-INT = 100
+val SHR-OPCODE-LONG = 101
+val ASHR-OPCODE-INT = 103
+val ASHR-OPCODE-LONG = 104
+val LT-OPCODE-INT = 105
+val LT-OPCODE-LONG = 106
+val LT-OPCODE-FLOAT = 107
+val LT-OPCODE-DOUBLE = 108
+val GT-OPCODE-INT = 109
+val GT-OPCODE-LONG = 110
+val GT-OPCODE-FLOAT = 111
+val GT-OPCODE-DOUBLE = 112
+val LE-OPCODE-INT = 113
+val LE-OPCODE-LONG = 114
+val LE-OPCODE-FLOAT = 115
+val LE-OPCODE-DOUBLE = 116
+val GE-OPCODE-INT = 117
+val GE-OPCODE-LONG = 118
+val GE-OPCODE-FLOAT = 119
+val GE-OPCODE-DOUBLE = 120
+val ULE-OPCODE-BYTE = 121
+val ULE-OPCODE-INT = 122
+val ULE-OPCODE-LONG = 123
+val ULT-OPCODE-BYTE = 124
+val ULT-OPCODE-INT = 125
+val ULT-OPCODE-LONG = 126
+val UGT-OPCODE-BYTE = 127
+val UGT-OPCODE-INT = 128
+val UGT-OPCODE-LONG = 129
+val UGE-OPCODE-BYTE = 130
+val UGE-OPCODE-INT = 131
+val UGE-OPCODE-LONG = 132
+;1-arity operations
+val INT-NOT-OPCODE = 133
+val INT-NEG-OPCODE = 134
+val NOT-OPCODE-BYTE = 135
+val NOT-OPCODE-INT = 136
+val NOT-OPCODE-LONG = 137
+val NEG-OPCODE-INT = 138
+val NEG-OPCODE-LONG = 139
+val NEG-OPCODE-FLOAT = 140
+val NEG-OPCODE-DOUBLE = 141
+val DEREF-OPCODE = 142
+val TYPEOF-OPCODE = 143
+;branch operation
+val JUMP-SET-OPCODE = 144
+val JUMP-TAGBITS-OPCODE = 240
+val JUMP-TAGWORD-OPCODE = 242
+val GOTO-OPCODE = 145
+;conversion operations
+val CONV-OPCODE-BYTE-FLOAT = 146
+val CONV-OPCODE-BYTE-DOUBLE = 147
+val CONV-OPCODE-INT-BYTE = 148
+val CONV-OPCODE-INT-FLOAT = 149
+val CONV-OPCODE-INT-DOUBLE = 150
+val CONV-OPCODE-LONG-BYTE = 151
+val CONV-OPCODE-LONG-INT = 152
+val CONV-OPCODE-LONG-FLOAT = 153
+val CONV-OPCODE-LONG-DOUBLE = 154
+val CONV-OPCODE-FLOAT-BYTE = 155
+val CONV-OPCODE-FLOAT-INT = 156
+val CONV-OPCODE-FLOAT-LONG = 157
+val CONV-OPCODE-FLOAT-DOUBLE = 158
+val CONV-OPCODE-DOUBLE-BYTE = 159
+val CONV-OPCODE-DOUBLE-INT = 160
+val CONV-OPCODE-DOUBLE-LONG = 161
+val CONV-OPCODE-DOUBLE-FLOAT = 162
+;tagging operations
+val DETAG-OPCODE = 163
+val TAG-OPCODE-BYTE = 164
+val TAG-OPCODE-CHAR = 165
+val TAG-OPCODE-INT = 166
+val TAG-OPCODE-FLOAT = 167
+;storing operations
+val STORE-OPCODE-1 = 168
+val STORE-OPCODE-4 = 169
+val STORE-OPCODE-8 = 170
+val STORE-OPCODE-1-VAR-OFFSET = 171
+val STORE-OPCODE-4-VAR-OFFSET = 172
+val STORE-OPCODE-8-VAR-OFFSET = 173
+;loading operations
+val LOAD-OPCODE-1 = 174
+val LOAD-OPCODE-4 = 175
+val LOAD-OPCODE-8 = 176
+val LOAD-OPCODE-1-VAR-OFFSET = 177
+val LOAD-OPCODE-4-VAR-OFFSET = 178
+val LOAD-OPCODE-8-VAR-OFFSET = 179
+;Allocation
+val RESERVE-OPCODE-LOCAL = 180
+val RESERVE-OPCODE-CONST = 181
+val ENTER-STACK-OPCODE = 182
+val ALLOC-OPCODE-CONST = 183
+val ALLOC-OPCODE-LOCAL = 184
+;system operations
+val GC-OPCODE = 185
+val CLASS-NAME-OPCODE = 241
+val C-RSP-OPCODE = 243
+val PRINT-STACK-TRACE-OPCODE = 186
+val FLUSH-VM-OPCODE = 188
+;2-arity branch operations
+val JUMP-INT-LT-OPCODE = 192
+val JUMP-INT-GT-OPCODE = 193
+val JUMP-INT-LE-OPCODE = 194
+val JUMP-INT-GE-OPCODE = 195
+val JUMP-EQ-OPCODE-REF = 196
+val JUMP-EQ-OPCODE-BYTE = 197
+val JUMP-EQ-OPCODE-INT = 198
+val JUMP-EQ-OPCODE-LONG = 199
+val JUMP-EQ-OPCODE-FLOAT = 200
+val JUMP-EQ-OPCODE-DOUBLE = 201
+val JUMP-NE-OPCODE-REF = 202
+val JUMP-NE-OPCODE-BYTE = 203
+val JUMP-NE-OPCODE-INT = 204
+val JUMP-NE-OPCODE-LONG = 205
+val JUMP-NE-OPCODE-FLOAT = 206
+val JUMP-NE-OPCODE-DOUBLE = 207
+val JUMP-LT-OPCODE-INT = 208
+val JUMP-LT-OPCODE-LONG = 209
+val JUMP-LT-OPCODE-FLOAT = 210
+val JUMP-LT-OPCODE-DOUBLE = 211
+val JUMP-GT-OPCODE-INT = 212
+val JUMP-GT-OPCODE-LONG = 213
+val JUMP-GT-OPCODE-FLOAT = 214
+val JUMP-GT-OPCODE-DOUBLE = 215
+val JUMP-LE-OPCODE-INT = 216
+val JUMP-LE-OPCODE-LONG = 217
+val JUMP-LE-OPCODE-FLOAT = 218
+val JUMP-LE-OPCODE-DOUBLE = 219
+val JUMP-GE-OPCODE-INT = 220
+val JUMP-GE-OPCODE-LONG = 221
+val JUMP-GE-OPCODE-FLOAT = 222
+val JUMP-GE-OPCODE-DOUBLE = 223
+val JUMP-ULE-OPCODE-BYTE = 224
+val JUMP-ULE-OPCODE-INT = 225
+val JUMP-ULE-OPCODE-LONG = 226
+val JUMP-ULT-OPCODE-BYTE = 227
+val JUMP-ULT-OPCODE-INT = 228
+val JUMP-ULT-OPCODE-LONG = 229
+val JUMP-UGT-OPCODE-BYTE = 230
+val JUMP-UGT-OPCODE-INT = 231
+val JUMP-UGT-OPCODE-LONG = 232
+val JUMP-UGE-OPCODE-BYTE = 233
+val JUMP-UGE-OPCODE-INT = 234
+val JUMP-UGE-OPCODE-LONG = 235
+;dispatch operation
+val DISPATCH-OPCODE = 236
+val DISPATCH-METHOD-OPCODE = 237
+;jump on register
+val JUMP-REG-OPCODE = 238
+;function entry
+val FNENTRY-OPCODE = 239
+
+defn set-reg-opcode (y:VMImm) :
+  match(y) :
+    (y:Local) : SET-REG-OPCODE-LOCAL
+    (y:NumConst) :
+      match(value(y)) :
+        (v:Char) : SET-REG-OPCODE-UNSIGNED
+        (v:Byte) : SET-REG-OPCODE-UNSIGNED
+        (v:Int) : SET-REG-OPCODE-UNSIGNED
+        (v:Long) : SET-REG-OPCODE-WIDE  ;OR SIGNED
+        (v:Float) : SET-REG-OPCODE-UNSIGNED
+        (v:Double) : SET-REG-OPCODE-WIDE
+    (y:Marker) : SET-REG-OPCODE-UNSIGNED
+    (y:Tag) : SET-REG-OPCODE-UNSIGNED
+    (y:CodeId) : SET-REG-OPCODE-CODE
+    (y:ExternId) : SET-REG-OPCODE-WIDE
+    (y:GlobalId) : SET-REG-OPCODE-GLOBAL
+    (y:DataId) : SET-REG-OPCODE-DATA
+    (y:ConstId) : SET-REG-OPCODE-CONST
+    (y:VoidMarker) : SET-REG-OPCODE-UNSIGNED
+
+defn set-opcode (y:VMImm) :
+  match(y) :
+    (y:Local) : SET-OPCODE-LOCAL
+    (y:NumConst) :
+      match(value(y)) :
+        (v:Char) : SET-OPCODE-UNSIGNED
+        (v:Byte) : SET-OPCODE-UNSIGNED
+        (v:Int) : SET-OPCODE-UNSIGNED
+        (v:Long) : SET-OPCODE-WIDE  ;OR SIGNED
+        (v:Float) : SET-OPCODE-UNSIGNED
+        (v:Double) : SET-OPCODE-WIDE
+    (y:Marker) : SET-OPCODE-UNSIGNED
+    (y:Tag) : SET-OPCODE-UNSIGNED
+    (y:CodeId) : SET-OPCODE-CODE
+    (y:ExternId) : SET-OPCODE-WIDE
+    (y:GlobalId) : SET-OPCODE-GLOBAL
+    (y:DataId) : SET-OPCODE-DATA
+    (y:ConstId) : SET-OPCODE-CONST
+    (y:VoidMarker) : SET-OPCODE-UNSIGNED
+
+defn call-opcode (f:VMImm) :
+  match(f) :
+    (f:Local) : CALL-OPCODE-LOCAL
+    (f:CodeId) : CALL-OPCODE-CODE
+
+defn callc-opcode (f:VMImm) :
+  match(f) :
+    (f:Local) : CALLC-OPCODE-LOCAL
+    (f:ExternId) :  CALLC-OPCODE-WIDE
+
+defn tcall-opcode (f:VMImm) :
+  match(f) :
+    (f:Local) : TCALL-OPCODE-LOCAL
+    (f:CodeId) : TCALL-OPCODE-CODE
+
+defn store-opcode (offset:VMImm|False, val-type:VMType) :
+  match(offset, val-type) :
+    (o:False, vt:VMByte) : STORE-OPCODE-1
+    (o:False, vt:VMInt) : STORE-OPCODE-4
+    (o:False, vt:VMLong) : STORE-OPCODE-8
+    (o:False, vt:VMFloat) : STORE-OPCODE-4
+    (o:False, vt:VMDouble) : STORE-OPCODE-8
+    (o:False, vt:VMRef) : STORE-OPCODE-8
+    (o:VMImm, vt:VMByte) : STORE-OPCODE-1-VAR-OFFSET
+    (o:VMImm, vt:VMInt) : STORE-OPCODE-4-VAR-OFFSET
+    (o:VMImm, vt:VMLong) : STORE-OPCODE-8-VAR-OFFSET
+    (o:VMImm, vt:VMFloat) : STORE-OPCODE-4-VAR-OFFSET
+    (o:VMImm, vt:VMDouble) : STORE-OPCODE-8-VAR-OFFSET
+    (o:VMImm, vt:VMRef) : STORE-OPCODE-8-VAR-OFFSET
+
+defn load-opcode (offset:VMImm|False, xtype:VMType) :
+  match(offset, xtype) :
+    (o:False, xt:VMByte) : LOAD-OPCODE-1
+    (o:False, xt:VMInt) : LOAD-OPCODE-4
+    (o:False, xt:VMLong) : LOAD-OPCODE-8
+    (o:False, xt:VMFloat) : LOAD-OPCODE-4
+    (o:False, xt:VMDouble) : LOAD-OPCODE-8
+    (o:False, xt:VMRef) : LOAD-OPCODE-8
+    (o:VMImm, xt:VMByte) : LOAD-OPCODE-1-VAR-OFFSET
+    (o:VMImm, xt:VMInt) : LOAD-OPCODE-4-VAR-OFFSET
+    (o:VMImm, xt:VMLong) : LOAD-OPCODE-8-VAR-OFFSET
+    (o:VMImm, xt:VMFloat) : LOAD-OPCODE-4-VAR-OFFSET
+    (o:VMImm, xt:VMDouble) : LOAD-OPCODE-8-VAR-OFFSET
+    (o:VMImm, xt:VMRef) : LOAD-OPCODE-8-VAR-OFFSET
+
+defn op0-opcode (op:VMOp) :
+  match(op) :
+    (op:FlushVMOp) : FLUSH-VM-OPCODE
+    (op:CRSPOp) : C-RSP-OPCODE
+
+;Returns false if operation becomes a set operation.
+defn op1-opcode (op:VMOp, xt:VMType, yt:VMType) -> Int|False :
+  match(op, xt, yt) :
+    (op:IntNotOp, xt:VMRef, yt:VMRef) : INT-NOT-OPCODE
+    (op:IntNegOp, xt:VMRef, yt:VMRef) : INT-NEG-OPCODE
+    (op:NotOp, xt:VMByte, yt:VMByte) : NOT-OPCODE-BYTE
+    (op:NotOp, xt:VMInt, yt:VMInt) : NOT-OPCODE-INT
+    (op:NotOp, xt:VMLong, yt:VMLong) : NOT-OPCODE-LONG
+    (op:NegOp, xt:VMInt, yt:VMInt) : NEG-OPCODE-INT
+    (op:NegOp, xt:VMLong, yt:VMLong) : NEG-OPCODE-LONG
+    (op:NegOp, xt:VMFloat, yt:VMFloat) : NEG-OPCODE-FLOAT
+    (op:NegOp, xt:VMDouble, yt:VMDouble) : NEG-OPCODE-DOUBLE
+    (op:InterpretOp, xt, yt) : false
+    (op:ConvOp, xt:VMByte, yt:VMByte) : false
+    (op:ConvOp, xt:VMByte, yt:VMInt) : false
+    (op:ConvOp, xt:VMByte, yt:VMLong) : false
+    (op:ConvOp, xt:VMByte, yt:VMFloat) : CONV-OPCODE-BYTE-FLOAT
+    (op:ConvOp, xt:VMByte, yt:VMDouble) : CONV-OPCODE-BYTE-DOUBLE
+    (op:ConvOp, xt:VMInt, yt:VMByte) : CONV-OPCODE-INT-BYTE
+    (op:ConvOp, xt:VMInt, yt:VMInt) : false
+    (op:ConvOp, xt:VMInt, yt:VMLong) : false
+    (op:ConvOp, xt:VMInt, yt:VMFloat) : CONV-OPCODE-INT-FLOAT
+    (op:ConvOp, xt:VMInt, yt:VMDouble) : CONV-OPCODE-INT-DOUBLE
+    (op:ConvOp, xt:VMLong, yt:VMByte) : CONV-OPCODE-LONG-BYTE
+    (op:ConvOp, xt:VMLong, yt:VMInt) : CONV-OPCODE-LONG-INT
+    (op:ConvOp, xt:VMLong, yt:VMLong) : false
+    (op:ConvOp, xt:VMLong, yt:VMFloat) : CONV-OPCODE-LONG-FLOAT
+    (op:ConvOp, xt:VMLong, yt:VMDouble) : CONV-OPCODE-LONG-DOUBLE
+    (op:ConvOp, xt:VMFloat, yt:VMByte) : CONV-OPCODE-FLOAT-BYTE
+    (op:ConvOp, xt:VMFloat, yt:VMInt) : CONV-OPCODE-FLOAT-INT
+    (op:ConvOp, xt:VMFloat, yt:VMLong) : CONV-OPCODE-FLOAT-LONG
+    (op:ConvOp, xt:VMFloat, yt:VMFloat) : false
+    (op:ConvOp, xt:VMFloat, yt:VMDouble) : CONV-OPCODE-FLOAT-DOUBLE
+    (op:ConvOp, xt:VMDouble, yt:VMByte) : CONV-OPCODE-DOUBLE-BYTE
+    (op:ConvOp, xt:VMDouble, yt:VMInt) : CONV-OPCODE-DOUBLE-INT
+    (op:ConvOp, xt:VMDouble, yt:VMLong) : CONV-OPCODE-DOUBLE-LONG
+    (op:ConvOp, xt:VMDouble, yt:VMFloat) : CONV-OPCODE-DOUBLE-FLOAT
+    (op:ConvOp, xt:VMDouble, yt:VMDouble) : false
+    (op:TagOp, xt, yt) :
+      switch(type(op)) :
+        BYTE-TYPE : TAG-OPCODE-BYTE
+        CHAR-TYPE : TAG-OPCODE-CHAR
+        INT-TYPE : TAG-OPCODE-INT
+        FLOAT-TYPE : TAG-OPCODE-FLOAT
+    (op:DetagOp, xt, yt) : DETAG-OPCODE
+    (op:DerefOp, xt, yt) : DEREF-OPCODE
+    (op:GCOp, xt, yt) : GC-OPCODE
+    (op:ClassNameOp, xt, yt) : CLASS-NAME-OPCODE
+    (op:PrintStackTraceOp, xt, yt) : PRINT-STACK-TRACE-OPCODE
+
+defn op2-opcode (op:VMOp, xt:VMType, yt:VMType) :
+  match(op, xt, yt) :
+    (op:IntAddOp, xt:VMRef, yt:VMRef) : INT-ADD-OPCODE
+    (op:IntSubOp, xt:VMRef, yt:VMRef) : INT-SUB-OPCODE
+    (op:IntMulOp, xt:VMRef, yt:VMRef) : INT-MUL-OPCODE
+    (op:IntDivOp, xt:VMRef, yt:VMRef) : INT-DIV-OPCODE
+    (op:IntModOp, xt:VMRef, yt:VMRef) : INT-MOD-OPCODE
+    (op:IntAndOp, xt:VMRef, yt:VMRef) : INT-AND-OPCODE
+    (op:IntOrOp, xt:VMRef, yt:VMRef) : INT-OR-OPCODE
+    (op:IntXorOp, xt:VMRef, yt:VMRef) : INT-XOR-OPCODE
+    (op:IntShlOp, xt:VMRef, yt:VMRef) : INT-SHL-OPCODE
+    (op:IntShrOp, xt:VMRef, yt:VMRef) : INT-SHR-OPCODE
+    (op:IntAshrOp, xt:VMRef, yt:VMRef) : INT-ASHR-OPCODE
+    (op:IntLtOp, xt:VMRef, yt:VMRef) : INT-LT-OPCODE
+    (op:IntGtOp, xt:VMRef, yt:VMRef) : INT-GT-OPCODE
+    (op:IntLeOp, xt:VMRef, yt:VMRef) : INT-LE-OPCODE
+    (op:IntGeOp, xt:VMRef, yt:VMRef) : INT-GE-OPCODE
+    (op:EqOp, xt:VMRef, yt:VMRef) : EQ-OPCODE-REF-REF
+    (op:EqOp, xt:VMLong, yt:VMRef) : EQ-OPCODE-REF
+    (op:EqOp, xt:VMLong, yt:VMByte) : EQ-OPCODE-BYTE
+    (op:EqOp, xt:VMLong, yt:VMInt) : EQ-OPCODE-INT
+    (op:EqOp, xt:VMLong, yt:VMLong) : EQ-OPCODE-LONG
+    (op:EqOp, xt:VMLong, yt:VMFloat) : EQ-OPCODE-FLOAT
+    (op:EqOp, xt:VMLong, yt:VMDouble) : EQ-OPCODE-DOUBLE
+    (op:NeOp, xt:VMRef, yt:VMRef) : NE-OPCODE-REF-REF
+    (op:NeOp, xt:VMLong, yt:VMRef) : NE-OPCODE-REF
+    (op:NeOp, xt:VMLong, yt:VMByte) : NE-OPCODE-BYTE
+    (op:NeOp, xt:VMLong, yt:VMInt) : NE-OPCODE-INT
+    (op:NeOp, xt:VMLong, yt:VMLong) : NE-OPCODE-LONG
+    (op:NeOp, xt:VMLong, yt:VMFloat) : NE-OPCODE-FLOAT
+    (op:NeOp, xt:VMLong, yt:VMDouble) : NE-OPCODE-DOUBLE
+    (op:AddOp, xt:VMByte, yt:VMByte) : ADD-OPCODE-BYTE
+    (op:AddOp, xt:VMInt, yt:VMInt) : ADD-OPCODE-INT
+    (op:AddOp, xt:VMLong, yt:VMLong) : ADD-OPCODE-LONG
+    (op:AddOp, xt:VMFloat, yt:VMFloat) : ADD-OPCODE-FLOAT
+    (op:AddOp, xt:VMDouble, yt:VMDouble) : ADD-OPCODE-DOUBLE
+    (op:SubOp, xt:VMByte, yt:VMByte) : SUB-OPCODE-BYTE
+    (op:SubOp, xt:VMInt, yt:VMInt) : SUB-OPCODE-INT
+    (op:SubOp, xt:VMLong, yt:VMLong) : SUB-OPCODE-LONG
+    (op:SubOp, xt:VMFloat, yt:VMFloat) : SUB-OPCODE-FLOAT
+    (op:SubOp, xt:VMDouble, yt:VMDouble) : SUB-OPCODE-DOUBLE
+    (op:MulOp, xt:VMByte, yt:VMByte) : MUL-OPCODE-BYTE
+    (op:MulOp, xt:VMInt, yt:VMInt) : MUL-OPCODE-INT
+    (op:MulOp, xt:VMLong, yt:VMLong) : MUL-OPCODE-LONG
+    (op:MulOp, xt:VMFloat, yt:VMFloat) : MUL-OPCODE-FLOAT
+    (op:MulOp, xt:VMDouble, yt:VMDouble) : MUL-OPCODE-DOUBLE
+    (op:DivOp, xt:VMByte, yt:VMByte) : DIV-OPCODE-BYTE
+    (op:DivOp, xt:VMInt, yt:VMInt) : DIV-OPCODE-INT
+    (op:DivOp, xt:VMLong, yt:VMLong) : DIV-OPCODE-LONG
+    (op:DivOp, xt:VMFloat, yt:VMFloat) : DIV-OPCODE-FLOAT
+    (op:DivOp, xt:VMDouble, yt:VMDouble) : DIV-OPCODE-DOUBLE
+    (op:ModOp, xt:VMByte, yt:VMByte) : MOD-OPCODE-BYTE
+    (op:ModOp, xt:VMInt, yt:VMInt) : MOD-OPCODE-INT
+    (op:ModOp, xt:VMLong, yt:VMLong) : MOD-OPCODE-LONG
+    (op:AndOp, xt:VMByte, yt:VMByte) : AND-OPCODE-BYTE
+    (op:AndOp, xt:VMInt, yt:VMInt) : AND-OPCODE-INT
+    (op:AndOp, xt:VMLong, yt:VMLong) : AND-OPCODE-LONG
+    (op:OrOp, xt:VMByte, yt:VMByte) : OR-OPCODE-BYTE
+    (op:OrOp, xt:VMInt, yt:VMInt) : OR-OPCODE-INT
+    (op:OrOp, xt:VMLong, yt:VMLong) : OR-OPCODE-LONG
+    (op:XorOp, xt:VMByte, yt:VMByte) : XOR-OPCODE-BYTE
+    (op:XorOp, xt:VMInt, yt:VMInt) : XOR-OPCODE-INT
+    (op:XorOp, xt:VMLong, yt:VMLong) : XOR-OPCODE-LONG
+    (op:ShlOp, xt:VMByte, yt:VMByte) : SHL-OPCODE-BYTE
+    (op:ShlOp, xt:VMInt, yt:VMInt) : SHL-OPCODE-INT
+    (op:ShlOp, xt:VMLong, yt:VMLong) : SHL-OPCODE-LONG
+    (op:ShrOp, xt:VMByte, yt:VMByte) : SHR-OPCODE-BYTE
+    (op:ShrOp, xt:VMInt, yt:VMInt) : SHR-OPCODE-INT
+    (op:ShrOp, xt:VMLong, yt:VMLong) : SHR-OPCODE-LONG
+    (op:AshrOp, xt:VMInt, yt:VMInt) : ASHR-OPCODE-INT
+    (op:AshrOp, xt:VMLong, yt:VMLong) : ASHR-OPCODE-LONG
+    (op:LtOp, xt:VMLong, yt:VMInt) : LT-OPCODE-INT
+    (op:LtOp, xt:VMLong, yt:VMLong) : LT-OPCODE-LONG
+    (op:LtOp, xt:VMLong, yt:VMFloat) : LT-OPCODE-FLOAT
+    (op:LtOp, xt:VMLong, yt:VMDouble) : LT-OPCODE-DOUBLE
+    (op:GtOp, xt:VMLong, yt:VMInt) : GT-OPCODE-INT
+    (op:GtOp, xt:VMLong, yt:VMLong) : GT-OPCODE-LONG
+    (op:GtOp, xt:VMLong, yt:VMFloat) : GT-OPCODE-FLOAT
+    (op:GtOp, xt:VMLong, yt:VMDouble) : GT-OPCODE-DOUBLE
+    (op:LeOp, xt:VMLong, yt:VMInt) : LE-OPCODE-INT
+    (op:LeOp, xt:VMLong, yt:VMLong) : LE-OPCODE-LONG
+    (op:LeOp, xt:VMLong, yt:VMFloat) : LE-OPCODE-FLOAT
+    (op:LeOp, xt:VMLong, yt:VMDouble) : LE-OPCODE-DOUBLE
+    (op:GeOp, xt:VMLong, yt:VMInt) : GE-OPCODE-INT
+    (op:GeOp, xt:VMLong, yt:VMLong) : GE-OPCODE-LONG
+    (op:GeOp, xt:VMLong, yt:VMFloat) : GE-OPCODE-FLOAT
+    (op:GeOp, xt:VMLong, yt:VMDouble) : GE-OPCODE-DOUBLE
+    (op:UltOp, xt:VMLong, yt:VMByte) : ULT-OPCODE-BYTE
+    (op:UltOp, xt:VMLong, yt:VMInt) : ULT-OPCODE-INT
+    (op:UltOp, xt:VMLong, yt:VMLong) : ULT-OPCODE-LONG
+    (op:UleOp, xt:VMLong, yt:VMByte) : ULE-OPCODE-BYTE
+    (op:UleOp, xt:VMLong, yt:VMInt) : ULE-OPCODE-INT
+    (op:UleOp, xt:VMLong, yt:VMLong) : ULE-OPCODE-LONG
+    (op:UgtOp, xt:VMLong, yt:VMByte) : UGT-OPCODE-BYTE
+    (op:UgtOp, xt:VMLong, yt:VMInt) : UGT-OPCODE-INT
+    (op:UgtOp, xt:VMLong, yt:VMLong) : UGT-OPCODE-LONG
+    (op:UgeOp, xt:VMLong, yt:VMByte) : UGE-OPCODE-BYTE
+    (op:UgeOp, xt:VMLong, yt:VMInt) : UGE-OPCODE-INT
+    (op:UgeOp, xt:VMLong, yt:VMLong) : UGE-OPCODE-LONG
+
+defn branch2-opcode (op:VMOp, xt:VMType) :
+  match(op, xt) :
+    (op:IntLtOp, xt:VMRef) : JUMP-INT-LT-OPCODE
+    (op:IntGtOp, xt:VMRef) : JUMP-INT-GT-OPCODE
+    (op:IntLeOp, xt:VMRef) : JUMP-INT-LE-OPCODE
+    (op:IntGeOp, xt:VMRef) : JUMP-INT-GE-OPCODE
+    (op:EqOp, xt:VMRef) : JUMP-EQ-OPCODE-REF
+    (op:EqOp, xt:VMByte) : JUMP-EQ-OPCODE-BYTE
+    (op:EqOp, xt:VMInt) : JUMP-EQ-OPCODE-INT
+    (op:EqOp, xt:VMLong) : JUMP-EQ-OPCODE-LONG
+    (op:EqOp, xt:VMFloat) : JUMP-EQ-OPCODE-FLOAT
+    (op:EqOp, xt:VMDouble) : JUMP-EQ-OPCODE-DOUBLE
+    (op:NeOp, xt:VMRef) : JUMP-NE-OPCODE-REF
+    (op:NeOp, xt:VMByte) : JUMP-NE-OPCODE-BYTE
+    (op:NeOp, xt:VMInt) : JUMP-NE-OPCODE-INT
+    (op:NeOp, xt:VMLong) : JUMP-NE-OPCODE-LONG
+    (op:NeOp, xt:VMFloat) : JUMP-NE-OPCODE-FLOAT
+    (op:NeOp, xt:VMDouble) : JUMP-NE-OPCODE-DOUBLE
+    (op:LtOp, xt:VMInt) : JUMP-LT-OPCODE-INT
+    (op:LtOp, xt:VMLong) : JUMP-LT-OPCODE-LONG
+    (op:LtOp, xt:VMFloat) : JUMP-LT-OPCODE-FLOAT
+    (op:LtOp, xt:VMDouble) : JUMP-LT-OPCODE-DOUBLE
+    (op:GtOp, xt:VMInt) : JUMP-GT-OPCODE-INT
+    (op:GtOp, xt:VMLong) : JUMP-GT-OPCODE-LONG
+    (op:GtOp, xt:VMFloat) : JUMP-GT-OPCODE-FLOAT
+    (op:GtOp, xt:VMDouble) : JUMP-GT-OPCODE-DOUBLE
+    (op:LeOp, xt:VMInt) : JUMP-LE-OPCODE-INT
+    (op:LeOp, xt:VMLong) : JUMP-LE-OPCODE-LONG
+    (op:LeOp, xt:VMFloat) : JUMP-LE-OPCODE-FLOAT
+    (op:LeOp, xt:VMDouble) : JUMP-LE-OPCODE-DOUBLE
+    (op:GeOp, xt:VMInt) : JUMP-GE-OPCODE-INT
+    (op:GeOp, xt:VMLong) : JUMP-GE-OPCODE-LONG
+    (op:GeOp, xt:VMFloat) : JUMP-GE-OPCODE-FLOAT
+    (op:GeOp, xt:VMDouble) : JUMP-GE-OPCODE-DOUBLE
+    (op:UltOp, xt:VMByte) : JUMP-ULT-OPCODE-BYTE
+    (op:UltOp, xt:VMInt) : JUMP-ULT-OPCODE-INT
+    (op:UltOp, xt:VMLong) : JUMP-ULT-OPCODE-LONG
+    (op:UleOp, xt:VMByte) : JUMP-ULE-OPCODE-BYTE
+    (op:UleOp, xt:VMInt) : JUMP-ULE-OPCODE-INT
+    (op:UleOp, xt:VMLong) : JUMP-ULE-OPCODE-LONG
+    (op:UgtOp, xt:VMByte) : JUMP-UGT-OPCODE-BYTE
+    (op:UgtOp, xt:VMInt) : JUMP-UGT-OPCODE-INT
+    (op:UgtOp, xt:VMLong) : JUMP-UGT-OPCODE-LONG
+    (op:UgeOp, xt:VMByte) : JUMP-UGE-OPCODE-BYTE
+    (op:UgeOp, xt:VMInt) : JUMP-UGE-OPCODE-INT
+    (op:UgeOp, xt:VMLong) : JUMP-UGE-OPCODE-LONG
