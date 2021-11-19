@@ -99,9 +99,11 @@ val STACK-FRAMES-OFFSET = next(stack-offsets, SIZEOF-LONG)
 val STACK-STACK-POINTER-OFFSET = next(stack-offsets, SIZEOF-LONG)
 val STACK-PC-OFFSET = next(stack-offsets, SIZEOF-LONG)
 
+defn vmstate-reg (a:Assembler, dst:Gp, offset:Int) -> Gp :
+  mov(a, dst, MemPtr(vmstate(), offset, SIZEOF-LONG))
+  dst
 defn vmstate-reg (a:Assembler, offset:Int) -> Gp :
-  mov(a, rax(), MemPtr(vmstate(), offset, SIZEOF-LONG))
-  rax()
+  vmstate-reg(a, rax(), offset)
 
 defn vmstate () :        r8()
 defn registers () :      r9()
@@ -113,10 +115,11 @@ defn tmp1 () :           r14()
 defn tmp2 () :           r15()
 defn etc-saved-registers () : [vmstate(), registers(), functions(), stack-pointer(), stk(), tmp1(), tmp2()]
 
+defn untag-stack (a:Assembler, dst:Gp, stk:Gp) -> Gp :
+  lea(a, dst, MemPtr(stk, 8 - 1, SIZEOF-LONG))
+  dst
 defn untag-stack (a:Assembler, stk:Gp) -> Gp :
-  mov(a, tmp1(), stk)
-  add(a, tmp1(), 8 - 1)
-  tmp1()
+  untag-stack(a, tmp1(), stk)
 
 extern malloc: (long) -> ptr<?>
 extern strcpy: (ptr<byte>, ptr<byte>) -> ptr<?>
@@ -195,11 +198,11 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
   ; Setup JIT registers
   mov(a, vmstate(), vms)
   debug(a, "JIT VMSTATE %llx\n" vmstate())
-  mov(a, registers(), vmstate-reg(a, VMSTATE-REGISTERS-OFFSET))
-  mov(a, functions(), vmstate-reg(a, VMSTATE-FUNCTIONS-OFFSET))
-  mov(a, current-stack(), vmstate-reg(a, VMSTATE-CURRENT-STACK-OFFSET))
+  vmstate-reg(a, registers(), VMSTATE-REGISTERS-OFFSET)
+  vmstate-reg(a, functions(), VMSTATE-FUNCTIONS-OFFSET)
+  vmstate-reg(a, current-stack(), VMSTATE-CURRENT-STACK-OFFSET)
   debug(a, "JIT CURRENT-STACK %llx\n" current-stack())
-  mov(a, stk(), untag-stack(a, current-stack()))
+  untag-stack(a, stk(), current-stack())
   debug(a, "JIT STK %llx\n" stk())
   ; dump-memory-64(a, stk(), 4L)
   println("STACK-STACK-POINTER-OFFSET %_" % [STACK-STACK-POINTER-OFFSET])
@@ -210,21 +213,11 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
   debug(a, "RET-LABEL %llx\n" tmp2())
   mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), tmp2())
   ; call init
-  mov(a, rax(), MemPtr(functions(), init-id * SIZEOF-LONG, SIZEOF-LONG))
   println("INIT-ID %_" % [init-id])
-  debug(a, "JIT INIT %llx\n" rax())
-  mov(a, rax(), MemPtr(functions(), init-id * SIZEOF-LONG, SIZEOF-LONG))
-  debug(a, "CALLING %llx\n", rax())
   mov(a, rax(), MemPtr(functions(), init-id * SIZEOF-LONG, SIZEOF-LONG))
   jmp(a, rax())
   bind(a, ret-label)
   debug(a, "RET-LABEL\n")
-  ; mov(a, rax(), 999L)
-  ; mov(a, rax(), stk())
-  ; mov(a, rax(), current-stack())
-  ; mov(a, rax(), vmstate())
-  ; mov(a, rax(), vms)
-  ; mov(a, rax(), to-long(init-id))
   ret(a)
   add(rt, code)
   ; TODO: CLEANUP
@@ -296,10 +289,9 @@ public defn encode (fid:Int, func:VMFunction,
   defn branch-is-final? (b:VMBranch) :
     all?(type-is-final?, types(b))
 
-  defn stack-frame-slots () -> Gp :
-    mov(a, rbx(), stack-pointer())
-    add(a, rbx(), STACK-FRAME-SLOTS-OFFSET)
-    rbx()
+  defn stack-frame-slots (dst:Gp) -> Gp :
+    lea(a, dst, MemPtr(stack-pointer(), STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG))
+    dst
   defn SET-REG (r:Int, v:Gp) :
     mov(a, MemPtr(registers(), r * SIZEOF-LONG, SIZEOF-LONG), v)
     debug(a, "SET-REG %d %llx\n", CONST(rbx(), r), v)
@@ -307,27 +299,27 @@ public defn encode (fid:Int, func:VMFunction,
     false
   defn SET-LOCAL (l:Int, v:Gp) :
     ; debug(a, "SET-LOCAL SLOTS %llx\n" stack-frame-slots())
-    mov(a, MemPtr(stack-frame-slots(), l * SIZEOF-LONG, SIZEOF-LONG), v)
+    mov(a, MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG), v)
     ; stack_pointer->slots[l] = v;
     false
   defn SET-LOCAL-FLOAT (l:Int,v:Gp) :
-    mov(a, MemPtr(stack-frame-slots(), l * SIZEOF-LONG, SIZEOF-LONG), v)
+    mov(a, MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG), v)
     ; float* addr = (float*)&(stack_pointer->slots[l])
     ; *addr = v
     false
   defn SET-LOCAL-DOUBLE (l:Int, v:Gp) :
-    mov(a, MemPtr(stack-frame-slots(), l * SIZEOF-LONG, SIZEOF-LONG), v)
+    mov(a, MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG), v)
     ; double* addr = (double*)&(stack_pointer->slots[l])
     ; *addr = v
     false
 
   defn LOCAL (x:Gp, l:Int) -> Gp :
-    mov(a, x, MemPtr(stack-frame-slots(), l * SIZEOF-LONG, SIZEOF-LONG)) 
+    mov(a, x, MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG)) 
     x
   defn LOCAL (l:Int) -> Gp : LOCAL(rax(), l)
    ; stack_pointer->slots[l]
   defn LOCAL-FLOAT (x:Gp, l:Int) -> Gp :
-    mov(a, x, MemPtr(stack-frame-slots(), l * SIZEOF-LONG, SIZEOF-LONG)) 
+    mov(a, x, MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG)) 
     x
     ; TODO: float register
     ; float* addr = (float*)&(stack_pointer->slots[l])
@@ -336,7 +328,7 @@ public defn encode (fid:Int, func:VMFunction,
     ; TODO: float register
     LOCAL-FLOAT(rax(), l)
   defn LOCAL-DOUBLE (x:Gp, l:Int) -> Gp :
-    mov(a, x, MemPtr(stack-frame-slots(), l * SIZEOF-LONG, SIZEOF-LONG)) 
+    mov(a, x, MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG)) 
     x
     ; TODO: double register
     ; double* addr = (double*)&(stack_pointer->slots[l])
@@ -373,7 +365,7 @@ public defn encode (fid:Int, func:VMFunction,
     mov(a, heap-top(), MemPtr(vmstate(), VMSTATE-HEAP-TOP-OFFSET, SIZEOF-LONG))
     mov(a, heap-limit(), MemPtr(vmstate(), VMSTATE-HEAP-LIMIT-OFFSET, SIZEOF-LONG))
     mov(a, current-stack(), MemPtr(vmstate(), VMSTATE-CURRENT-STACK-OFFSET, SIZEOF-LONG))
-    mov(a, stk(), untag-stack(a, current-stack()))
+    untag-stack(a, stk(), current-stack())
     mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG))
     ; mov(a, stack-limit(a), compute-stack-limit(a))
     caller-restore-registers(a)
@@ -563,19 +555,9 @@ public defn encode (fid:Int, func:VMFunction,
         ; debug(a, "OFFSETS %llx\n", data-offsets())
         ; dump-memory-32(a, data-offsets(), 8L)
         mov(a, ebx(), MemPtr(data-offsets(), value * SIZEOF-INT, SIZEOF-INT)) ; data_offsets[value]
-        debug(a, "OFFSET %lld\n", ebx())
-        shl(a, ebx(), 3)          ; 8 * data_offsets[value]
-        mov(a, tmp2(), ebx())
-        debug(a, "OFFSET << 3 %lld\n", tmp2())
-        mov(a, tmp1(), data-mem()) ; data_mem
-        debug(a, "DATA-MEM %llx\n", tmp1())
-        debug(a, "TMP1 %llx\n", tmp1())
-        debug(a, "TMP2 %llx\n", tmp2())
-        add(a, tmp1(), tmp2())     ; data_mem + 8 * data_offsets[value]
-        debug(a, "DATA-ADDR %llx\n", tmp1())
+        lea(a, tmp1(), MemPtr(data-mem(), ebx(), 3, 0, SIZEOF-LONG))
         SET-REG(x, tmp1())
-        mov(a, tmp2(), to-long(x))
-        debug(a, "SET-REG-DATA %x %llx\n" tmp2() tmp1())
+        debug(a, "SET-REG-DATA %x %llx\n" CONST(tmp2(), x) tmp1())
         ; debug(a, "REGISTERS:\n")
         ; dump-memory-64(a, registers(), 5L)
         ; debug(a, "DATA:\n")
@@ -609,14 +591,12 @@ public defn encode (fid:Int, func:VMFunction,
       JUMP-REG-OPCODE : println("C JUMP-REG ?")
       INT-ADD-OPCODE :
         println("C INT-ADD")
-        mov(a, tmp1(), LOCAL(y))
-        add(a, tmp1(), LOCAL(value))
+        add(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         debug(a, "INT-ADD %llx\n" tmp1())
         SET-LOCAL(x, tmp1())
       INT-SUB-OPCODE :
         println("C INT-SUB")
-        mov(a, tmp1(), LOCAL(y))
-        sub(a, tmp1(), LOCAL(value))
+        add(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         debug(a, "INT-SUB %llx\n" tmp1())
         SET-LOCAL(x, tmp1())
       INT-MUL-OPCODE : println("C INT-MUL ?")
