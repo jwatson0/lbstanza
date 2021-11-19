@@ -292,6 +292,9 @@ public defn encode (fid:Int, func:VMFunction,
   defn stack-frame-slots (dst:Gp) -> Gp :
     lea(a, dst, MemPtr(stack-pointer(), STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG))
     dst
+  defn GET-REG (dst:Gp, r:Int) :
+    mov(a, dst, MemPtr(registers(), r * SIZEOF-LONG, SIZEOF-LONG))
+    dst
   defn SET-REG (r:Int, v:Gp) :
     mov(a, MemPtr(registers(), r * SIZEOF-LONG, SIZEOF-LONG), v)
     debug(a, "SET-REG %d %llx\n", CONST(rbx(), r), v)
@@ -496,9 +499,8 @@ public defn encode (fid:Int, func:VMFunction,
       PRINT-STACK-TRACE-OPCODE : println("B PRINT-STACK-TRACE ?")
       GET-REG-OPCODE :
         println("B GET-REG %_ %_" % [x value])
-        mov(a, tmp1(), MemPtr(registers(), value * SIZEOF-LONG, SIZEOF-LONG))
-        debug(a, "GET-REG %llx\n" tmp1())
-        SET-LOCAL(x, tmp1())
+        debug(a, "GET-REG %llx\n" GET-REG(tmp1(), value))
+        SET-LOCAL(x, GET-REG(tmp1(), value))
       else : println("MISSING B OPCODE %_" % [opcode])
   defn emit-ins-c (opcode:Int, x:Int, value:Int) :
     switch(opcode) :
@@ -586,17 +588,22 @@ public defn encode (fid:Int, func:VMFunction,
     add(a, x, MARKER-TAG-BITS)
     x
 
-  defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Int) :
+  defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Label|Int) :
     switch(opcode) :
-      JUMP-REG-OPCODE : println("C JUMP-REG ?")
+      JUMP-REG-OPCODE :
+        val reg = x
+        val arity = y
+        cmp(a, GET-REG(tmp1(), reg), CONST(tmp2(), arity))
+        je(a, value as Label)
+        println("C JUMP-REG")
       INT-ADD-OPCODE :
         println("C INT-ADD")
-        add(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
+        add(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
         debug(a, "INT-ADD %llx\n" tmp1())
         SET-LOCAL(x, tmp1())
       INT-SUB-OPCODE :
         println("C INT-SUB")
-        add(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
+        add(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
         debug(a, "INT-SUB %llx\n" tmp1())
         SET-LOCAL(x, tmp1())
       INT-MUL-OPCODE : println("C INT-MUL ?")
@@ -614,7 +621,7 @@ public defn encode (fid:Int, func:VMFunction,
       INT-GE-OPCODE : println("C INT-GE ?")
       EQ-OPCODE-REF-REF :
         println("C EQ-REF-REF")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
         set-e(a, rax())
         SET-LOCAL(x, BOOLREF(rax()))
       EQ-OPCODE-REF : println("C EQ-REF ?")
@@ -835,22 +842,20 @@ public defn encode (fid:Int, func:VMFunction,
 
   ;Encode multivarity functions
   defn encode (multi:VMMultifn) :
-    ;TODO:
-    ; ;Declare function positions
-    ; var functions
-    ; ;Emit branch instructions
-    ; for (entry in funcs(multi), i in 0 to false) do :
-    ;   val arity = key(entry)
-    ;   val offset = functions[i] - buffer-pos()
-    ;   emit-ins-c(JUMP-REG-OPCODE, arg(multi), arity, offset)
-    ; ;Emit default branch
-    ; encode(default(multi))
-    ; ;Emit other branches, and compute their positions
-    ; functions = for entry in funcs(multi) map :
-    ;   encode(value(entry))
-    Func(rt) ; TODO: make real
+    ;Declare function labels
+    val labels = for entry in funcs(multi) map : new-label(a)
+    ;Emit branch instructions
+    for (entry in funcs(multi), flabel in labels) do :
+      val arity = key(entry)
+      emit-ins-c(JUMP-REG-OPCODE, arg(multi), arity, flabel)
+    ;Emit default branch
+    encode(default(multi))
+    ;Emit other branches, and compute their positions
+    for (entry in funcs(multi), flabel in labels) do :
+      bind(a, flabel)
+      encode(value(entry))
 
-  defn encode (func:VMFunc) -> Func :
+  defn encode (func:VMFunc) :
     ;==================================================
     ;============== Fundamental State =================
     ;==================================================
@@ -1300,9 +1305,9 @@ public defn encode (fid:Int, func:VMFunction,
     ;===================== Launch =====================
     ;==================================================
     driver()
-    add(rt, code)
-
-  val f = encode(func as VMMultifn|VMFunc)
+  
+  encode(func as VMMultifn|VMFunc)
+  val f = add(rt, code)
   EncodedFunction(f, fileinfo-table)
 
 ;============================================================
