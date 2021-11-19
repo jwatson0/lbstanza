@@ -1,4 +1,5 @@
 #include<stdio.h>
+#include<stddef.h>
 #include<stdlib.h>
 #include<sys/types.h>
 #include<stdint.h>
@@ -476,6 +477,40 @@ uint64_t ptr_to_ref (void* p){
 //    }
 //  }
 //}
+
+static void dump_memory (uint64_t* start, uint64_t n) {
+  uint64_t i = 0;
+  for (uint64_t* ptr = start; i < n; ptr += 1, i += 1) {
+    printf("%p: %llx\n", ptr, *ptr);
+  }
+}
+
+void vm_start (VMState* vms, uint64_t stanza_crsp){
+  //Pull out local cache
+  char* instructions = vms->instructions;
+  uint64_t* registers = vms->registers;
+  uint64_t* global_offsets = vms->global_offsets;
+  char* global_mem = vms->global_mem;
+  uint64_t* const_table = vms->const_table;
+  char* const_mem = vms->const_mem;
+  uint32_t* data_offsets = vms->data_offsets;
+  char* data_mem = vms->data_mem;
+  uint32_t* code_offsets = vms->code_offsets;
+  //Variable State
+  //Changes in_between each boundary change
+  char* heap_top = vms->heap_top;
+  char* heap_limit = vms->heap_limit;
+  printf("CVM VMS %llx\n", vms);
+  uint64_t current_stack = vms->current_stack;
+  printf("CVM CURRENT-STACK %llx\n", current_stack);
+  Stack* stk = untag_stack(current_stack);
+  printf("CVM STK %llx\n", stk);
+  // dump_memory(stk, 4);
+  StackFrame* stack_pointer = stk->stack_pointer;
+  printf("CVM STACK-POINTER %llx\n", stack_pointer);
+  char* stack_limit = (char*)(stk->frames) + stk->size;
+  char* pc = instructions + stk->pc;  
+}
 
 void vmloop (VMState* vms, uint64_t stanza_crsp){
   //Pull out local cache

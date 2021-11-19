@@ -22,19 +22,51 @@ extern assembler_mov_label: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_mov_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_mov_gp_ptr: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_mov_ptr_gp: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_lea_ptr: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_jmp_label: (ptr<?>, ptr<?>) -> int
 extern assembler_jmp_mem: (ptr<?>, ptr<?>) -> int
 extern assembler_jmp_reg: (ptr<?>, ptr<?>) -> int
+extern assembler_je: (ptr<?>, ptr<?>) -> int
 extern assembler_jne: (ptr<?>, ptr<?>) -> int
+extern assembler_js: (ptr<?>, ptr<?>) -> int
+extern assembler_jns: (ptr<?>, ptr<?>) -> int
+extern assembler_jg: (ptr<?>, ptr<?>) -> int
+extern assembler_jge: (ptr<?>, ptr<?>) -> int
+extern assembler_jl: (ptr<?>, ptr<?>) -> int
+extern assembler_jle: (ptr<?>, ptr<?>) -> int
+extern assembler_ja: (ptr<?>, ptr<?>) -> int
+extern assembler_jae: (ptr<?>, ptr<?>) -> int
+extern assembler_jb: (ptr<?>, ptr<?>) -> int
+extern assembler_jbe: (ptr<?>, ptr<?>) -> int
 extern assembler_add_int: (ptr<?>, ptr<?>, long) -> int
 extern assembler_add_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_sub_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_and_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_or_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_shl: (ptr<?>, ptr<?>, int) -> int
+extern assembler_shr: (ptr<?>, ptr<?>, int) -> int
+extern assembler_cmp: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_set_e: (ptr<?>, ptr<?>) -> int
+extern assembler_set_ne: (ptr<?>, ptr<?>) -> int
+extern assembler_set_s: (ptr<?>, ptr<?>) -> int
+extern assembler_set_ns: (ptr<?>, ptr<?>) -> int
+extern assembler_set_g: (ptr<?>, ptr<?>) -> int
+extern assembler_set_ge: (ptr<?>, ptr<?>) -> int
+extern assembler_set_l: (ptr<?>, ptr<?>) -> int
+extern assembler_set_le: (ptr<?>, ptr<?>) -> int
+extern assembler_set_a: (ptr<?>, ptr<?>) -> int
+extern assembler_set_ae: (ptr<?>, ptr<?>) -> int
+extern assembler_set_b: (ptr<?>, ptr<?>) -> int
+extern assembler_set_be: (ptr<?>, ptr<?>) -> int
 extern x86_ptr_gp_base_const_offset_size: (ptr<?>, long, long) -> ptr<?>
 extern x86_ptr_gp_base_index_const_shift_offset_size: (ptr<?>, ptr<?>, long, long, long) -> ptr<?>
 extern x86_ptr_label_base_index_const_shift_offset_size: (ptr<?>, ptr<?>, long, long, long) -> ptr<?>
 extern x86_ptr_label_base_const_index_size: (ptr<?>, long, long) -> ptr<?>
 extern func_call: (ptr<?>) -> int
 extern x86_eax: () -> ptr<?>
+extern x86_ebx: () -> ptr<?>
+extern x86_ecx: () -> ptr<?>
+extern x86_edx: () -> ptr<?>
 extern x86_rax: () -> ptr<?>
 extern x86_rcx: () -> ptr<?>
 extern x86_rdx: () -> ptr<?>
@@ -88,6 +120,12 @@ public lostanza defn MemPtr (base-ptr:ref<Label>, index:ref<Int>, size:ref<Int>)
 
 public lostanza defn eax () -> ref<Gp> :
   return new Gp{ call-c x86_eax() }
+public lostanza defn ebx () -> ref<Gp> :
+  return new Gp{ call-c x86_ebx() }
+public lostanza defn ecx () -> ref<Gp> :
+  return new Gp{ call-c x86_ecx() }
+public lostanza defn edx () -> ref<Gp> :
+  return new Gp{ call-c x86_edx() }
 public lostanza defn rax () -> ref<Gp> :
   return new Gp{ call-c x86_rax() }
 public lostanza defn rcx () -> ref<Gp> :
@@ -168,8 +206,20 @@ public lostanza defn add (a:ref<Assembler>, reg:ref<Gp>, value:ref<Int>) -> ref<
 public lostanza defn add (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
   call-c assembler_add_reg(a.value, dst.value, src.value)
   return false
+public lostanza defn and-op (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_and_reg(a.value, dst.value, src.value)
+  return false
+public lostanza defn or-op (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_or_reg(a.value, dst.value, src.value)
+  return false
+public lostanza defn sub (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_sub_reg(a.value, dst.value, src.value)
+  return false
 public lostanza defn shl (a:ref<Assembler>, reg:ref<Gp>, value:ref<Int>) -> ref<False> :
   call-c assembler_shl(a.value, reg.value, value.value)
+  return false
+public lostanza defn shr (a:ref<Assembler>, reg:ref<Gp>, value:ref<Int>) -> ref<False> :
+  call-c assembler_shr(a.value, reg.value, value.value)
   return false
 public lostanza defn mov (a:ref<Assembler>, reg:ref<Gp>, value:ref<Long>) -> ref<False> :
   call-c assembler_mov_const(a.value, reg.value, value.value)
@@ -188,6 +238,48 @@ public lostanza defn mov (a:ref<Assembler>, ptr:ref<MemPtr>, reg:ref<Gp>) -> ref
   return false
 public lostanza defn call (func:ref<Func>) -> ref<Long> :
   return new Long{ call-c func_call(func.value) }
+public lostanza defn lea (a:ref<Assembler>, reg:ref<Gp>, ptr:ref<MemPtr>) -> ref<False> :
+  call-c assembler_lea_ptr(a.value, reg.value, ptr.value)
+  return false
+public lostanza defn cmp (a:ref<Assembler>, x:ref<Gp>, y:ref<Gp>) -> ref<False> :
+  call-c assembler_cmp(a.value, x.value, y.value)
+  return false
+public lostanza defn set-e (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
+  call-c assembler_set_e(a.value, x.value)
+  return false
+public lostanza defn set-ne (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
+  call-c assembler_set_ne(a.value, x.value)
+  return false
+public lostanza defn set-s (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
+  call-c assembler_set_s(a.value, x.value)
+  return false
+public lostanza defn set-ns (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
+  call-c assembler_set_ns(a.value, x.value)
+  return false
+public lostanza defn set-g (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
+  call-c assembler_set_g(a.value, x.value)
+  return false
+public lostanza defn set-ge (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
+  call-c assembler_set_ge(a.value, x.value)
+  return false
+public lostanza defn set-l (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
+  call-c assembler_set_l(a.value, x.value)
+  return false
+public lostanza defn set-le (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
+  call-c assembler_set_le(a.value, x.value)
+  return false
+public lostanza defn set-a (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
+  call-c assembler_set_a(a.value, x.value)
+  return false
+public lostanza defn set-ae (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
+  call-c assembler_set_ae(a.value, x.value)
+  return false
+public lostanza defn set-b (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
+  call-c assembler_set_b(a.value, x.value)
+  return false
+public lostanza defn set-be (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
+  call-c assembler_set_be(a.value, x.value)
+  return false
 
 public lostanza defn jmp (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
   call-c assembler_jmp_label(a.value, lab.value)
@@ -198,7 +290,40 @@ public lostanza defn jmp (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
 public lostanza defn jmp (a:ref<Assembler>, ptr:ref<MemPtr>) -> ref<False> :
   call-c assembler_jmp_label(a.value, ptr.value)
   return false
+public lostanza defn je (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
+  call-c assembler_je(a.value, lab.value)
+  return false
 public lostanza defn jne (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
-  call-c assembler_jmp_label(a.value, lab.value)
+  call-c assembler_jne(a.value, lab.value)
+  return false
+public lostanza defn js (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
+  call-c assembler_js(a.value, lab.value)
+  return false
+public lostanza defn jns (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
+  call-c assembler_jns(a.value, lab.value)
+  return false
+public lostanza defn jg (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
+  call-c assembler_jg(a.value, lab.value)
+  return false
+public lostanza defn jge (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
+  call-c assembler_jge(a.value, lab.value)
+  return false
+public lostanza defn jl (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
+  call-c assembler_jl(a.value, lab.value)
+  return false
+public lostanza defn jle (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
+  call-c assembler_jle(a.value, lab.value)
+  return false
+public lostanza defn ja (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
+  call-c assembler_ja(a.value, lab.value)
+  return false
+public lostanza defn jae (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
+  call-c assembler_jae(a.value, lab.value)
+  return false
+public lostanza defn jb (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
+  call-c assembler_jb(a.value, lab.value)
+  return false
+public lostanza defn jbe (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
+  call-c assembler_jbe(a.value, lab.value)
   return false
 

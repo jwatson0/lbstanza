@@ -44,9 +44,6 @@ Label* assembler_new_label(Assembler *a) {
 void assembler_bind(Assembler *a, Label *label) {
   a->bind(*label);
 }
-void assembler_jne(Assembler *a, Label *label) {
-  a->jne(*label);
-}
 void assembler_jmp_label(Assembler *a, Label *label) {
   a->jmp(*label);
 }
@@ -56,14 +53,62 @@ void assembler_jmp_mem(Assembler *a, MemPtr *mem) {
 void assembler_jmp_reg(Assembler *a, Gp *reg) {
   a->jmp(*reg);
 }
+void assembler_je(Assembler *a, Label *label) {
+  a->je(*label);
+}
+void assembler_jne(Assembler *a, Label *label) {
+  a->jne(*label);
+}
+void assembler_js(Assembler *a, Label *label) {
+  a->js(*label);
+}
+void assembler_jns(Assembler *a, Label *label) {
+  a->jns(*label);
+}
+void assembler_jg(Assembler *a, Label *label) {
+  a->jg(*label);
+}
+void assembler_jge(Assembler *a, Label *label) {
+  a->jge(*label);
+}
+void assembler_jl(Assembler *a, Label *label) {
+  a->jl(*label);
+}
+void assembler_jle(Assembler *a, Label *label) {
+  a->jle(*label);
+}
+void assembler_ja(Assembler *a, Label *label) {
+  a->ja(*label);
+}
+void assembler_jae(Assembler *a, Label *label) {
+  a->jae(*label);
+}
+void assembler_jb(Assembler *a, Label *label) {
+  a->jb(*label);
+}
+void assembler_jbe(Assembler *a, Label *label) {
+  a->jbe(*label);
+}
+void assembler_and_reg(Assembler *a, const Gp *dst, const Gp *src) {
+  a->and_(*dst, *src);
+}
+void assembler_or_reg(Assembler *a, const Gp *dst, const Gp *src) {
+  a->or_(*dst, *src);
+}
 void assembler_add_reg(Assembler *a, const Gp *dst, const Gp *src) {
   a->add(*dst, *src);
 }
 void assembler_add_int(Assembler *a, const Gp *dst, int src) {
   a->add(*dst, src);
 }
+void assembler_sub_reg(Assembler *a, const Gp *dst, const Gp *src) {
+  a->sub(*dst, *src);
+}
 void assembler_shl(Assembler *a, const Gp *dst, int src) {
   a->shl(*dst, src);
+}
+void assembler_shr(Assembler *a, const Gp *dst, int src) {
+  a->shr(*dst, src);
 }
 void assembler_push(Assembler *a, Gp *reg) {
   a->push(*reg);
@@ -95,6 +140,49 @@ void assembler_mov_gp_ptr(Assembler *a, const Gp *reg, MemPtr* mem) {
 void assembler_mov_ptr_gp(Assembler *a, const MemPtr* mem, Gp *reg) {
   a->mov(mem->value, *reg);
 }
+void assembler_lea_ptr(Assembler *a, const Gp *reg, MemPtr *mem) {
+  a->lea(*reg, mem->value);
+}
+void assembler_cmp(Assembler *a, const Gp *x, const Gp *y) {
+  a->cmp(*x, *y);
+}
+void assembler_set_e(Assembler *a, const Gp *x) {
+  a->sete(*x);
+}
+void assembler_set_ne(Assembler *a, const Gp *x) {
+  a->setne(*x);
+}
+void assembler_set_s(Assembler *a, const Gp *x) {
+  a->sets(*x);
+}
+void assembler_set_ns(Assembler *a, const Gp *x) {
+  a->setns(*x);
+}
+void assembler_set_g(Assembler *a, const Gp *x) {
+  a->setg(*x);
+}
+void assembler_set_ge(Assembler *a, const Gp *x) {
+  a->setge(*x);
+}
+void assembler_set_l(Assembler *a, const Gp *x) {
+  a->setl(*x);
+}
+void assembler_set_le(Assembler *a, const Gp *x) {
+  a->setle(*x);
+}
+void assembler_set_a(Assembler *a, const Gp *x) {
+  a->seta(*x);
+}
+void assembler_set_ae(Assembler *a, const Gp *x) {
+  a->setae(*x);
+}
+void assembler_set_b(Assembler *a, const Gp *x) {
+  a->setb(*x);
+}
+void assembler_set_be(Assembler *a, const Gp *x) {
+  a->setbe(*x);
+}
+
 uint64_t func_call(Func f) {
   return f();
 }
@@ -104,11 +192,20 @@ const Gp* x86_eax(void) {
 const Gp* x86_rax(void) {
   return &rax;
 }
+const Gp* x86_ecx(void) {
+  return &ecx;
+}
 const Gp* x86_rcx(void) {
   return &rcx;
 }
+const Gp* x86_edx(void) {
+  return &edx;
+}
 const Gp* x86_rdx(void) {
   return &rdx;
+}
+const Gp* x86_ebx(void) {
+  return &ebx;
 }
 const Gp* x86_rbx(void) {
   return &rbx;
@@ -188,10 +285,22 @@ void dump_registers (void) {
   asm("\t movq %%r9,%0" : "=r"(r9));  
   printf("R9 = %llx\n", r9);
 }
-void dump_memory (uint64_t* start, uint64_t n) {
+void dump_memory_64 (uint64_t* start, uint64_t n) {
   uint64_t i = 0;
   for (uint64_t* ptr = start; i < n; ptr += 1, i += 1) {
     printf("%llx: %llx\n", ptr, *ptr);
+  }
+}
+void dump_memory_32 (uint32_t* start, uint64_t n) {
+  uint64_t i = 0;
+  for (uint32_t* ptr = start; i < n; ptr += 1, i += 1) {
+    printf("%llx: %lx\n", ptr, *ptr);
+  }
+}
+void dump_memory_8 (uint8_t* start, uint64_t n) {
+  uint64_t i = 0;
+  for (uint8_t* ptr = start; i < n; ptr += 1, i += 1) {
+    printf("%llx: %x\n", ptr, *ptr);
   }
 }
 void c_trampoline_stub (uint64_t fptr, uint64_t* registers, uint64_t* returns) {

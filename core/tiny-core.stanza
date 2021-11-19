@@ -1,6 +1,6 @@
 defpackage core
 
-protected extern printf: (ptr<byte>, ? ...) -> int
+;;; REQUIRED FOR COMPILER
 
 protected lostanza deftype Type :
    length: long
@@ -71,7 +71,6 @@ protected defn no-method-error (multi:String, args:Tuple) : fatal("NME")
 protected defn amb-method-error (multi:String, args:Tuple) : fatal("AME")
 protected lostanza defn tuple-length-error (actual-len:long, expected-len:long) -> ref<Void> : return fatal(String("TLE"))
 protected defn no-branch-error (args:Tuple) : fatal("NBE")
-protected defn amb-method-error (multi:String, args:Tuple) : fatal("ABE")
 protected lostanza defn cast-error (type:ref<Type>, obj:ref<?>, ctxt:int) -> ref<Void> : return fatal(String("CE"))
 protected defn variable-uninitialized-error (name:String|False) -> Void : fatal("VUE")
 protected lostanza defn invalid-return-error () -> ref<Void> : return fatal(String("IRE"))
@@ -85,8 +84,39 @@ lostanza defn class-name (x:int) -> ptr<byte> : return ""
 public lostanza defn String (chars:ptr<byte>) -> ref<String> : return new String{1, 0}
 defn execute-toplevel-command (f:() -> False) -> True|False : false
 
-lostanza defn main () -> ref<False> :
-  call-c printf("HELLO WORLD\n")
+;;; APP
+
+protected extern printf: (ptr<byte>, ? ...) -> int
+
+lostanza defn debug (x:ref<Int>) -> ref<False> :
+  call-c printf("HELLO WORLD %d\n" x.value)
   return false
 
+defn plus (a:Int, b:Int) -> Int :
+  ($prim add a b)
+
+defn minus (a:Int, b:Int) -> Int :
+  ($prim sub a b)
+
+defn equal? (a:Int, b:Int) -> True|False :
+  ($prim eq a b)
+
+defn count (n:Int) -> Int :
+  let loop (c:Int = n) :
+    if c == 0 :
+      n
+    else :
+      loop(c - 1)
+
+defn main () :
+  ; debug(count(1 + 2))
+  count(3)
+
 main()
+
+; lostanza defn main () -> ref<False> :
+;   call-c printf("HELLO WORLD\n")
+;   return false
+;
+; main()
+
