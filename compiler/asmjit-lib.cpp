@@ -192,6 +192,18 @@ void assembler_set_be(Assembler *a, const Gp *x) {
 uint64_t func_call(Func f) {
   return f();
 }
+const Gp* x86_al(void) {
+  return &al;
+}
+const Gp* x86_bl(void) {
+  return &bl;
+}
+const Gp* x86_cl(void) {
+  return &cl;
+}
+const Gp* x86_dl(void) {
+  return &dl;
+}
 const Gp* x86_eax(void) {
   return &eax;
 }

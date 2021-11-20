@@ -79,6 +79,10 @@ extern "C" {
     (Label *base, Gp* index, int32_t shift, int32_t offset, int32_t size);
   const MemPtr* x86_ptr_label_base_const_index_size (Label *base, int32_t index, int32_t size);
   const MemPtr* x86_ptr_label_base_index_const_shift_offset_size (Label *base, Gp* index, int32_t shift, int32_t offset, int32_t size);
+  const Gp* x86_al(void);
+  const Gp* x86_bl(void);
+  const Gp* x86_cl(void);
+  const Gp* x86_dl(void);
   const Gp* x86_eax(void);
   const Gp* x86_rax(void);
   const Gp* x86_rcx(void);
