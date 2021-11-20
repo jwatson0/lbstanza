@@ -95,6 +95,12 @@ void assembler_and_reg(Assembler *a, const Gp *dst, const Gp *src) {
 void assembler_or_reg(Assembler *a, const Gp *dst, const Gp *src) {
   a->or_(*dst, *src);
 }
+void assembler_not_reg(Assembler *a, const Gp *dst) {
+  a->not_(*dst);
+}
+void assembler_neg_reg(Assembler *a, const Gp *dst) {
+  a->neg(*dst);
+}
 void assembler_add_reg(Assembler *a, const Gp *dst, const Gp *src) {
   a->add(*dst, *src);
 }

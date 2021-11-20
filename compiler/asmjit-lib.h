@@ -52,6 +52,8 @@ extern "C" {
   void assembler_sub_reg(Assembler *a, const Gp *dst, const Gp *src);
   void assembler_and_reg(Assembler *a, const Gp *dst, const Gp *src);
   void assembler_or_reg(Assembler *a, const Gp *dst, const Gp *src);
+  void assembler_not_reg(Assembler *a, const Gp *dst);
+  void assembler_neg_reg(Assembler *a, const Gp *dst);
   void assembler_shl(Assembler *a, const Gp *dst, int src);
   void assembler_shr(Assembler *a, const Gp *dst, int src);
   void assembler_cmp(Assembler *a, const Gp *x, const Gp *y);

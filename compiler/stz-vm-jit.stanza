@@ -53,16 +53,55 @@ defn bind-parameters (a:Assembler, args:Seqable<Gp>) :
   for (param in params, arg in args) do :
     mov(a, param, arg)
 
-extern c_trampoline_stub: (long, ptr<long>, ptr<long>) -> int
+; extern c_trampoline_stub: (long, ptr<long>, ptr<long>) -> int
 
-lostanza defn c-trampoline (a:ref<Assembler>, args:ref<Tuple<Gp>>) -> ref<False> :
+lostanza defn c-call (a:ref<Assembler>, faddr:ref<Long>, args:ref<Tuple<Gp>>) -> ref<Gp> :
   caller-save-registers(a)
   bind-parameters(a, args)
-  mov(a, tmp1(), new Long{addr!(c_trampoline) as long})
+  mov(a, tmp1(), faddr)
   call(a, tmp1())
   caller-restore-registers(a)
-  return false
+  return rax()
 
+lostanza defn c-trampoline-addr () -> ref<Long> :
+  return new Long{addr!(c_trampoline) as long}
+
+defn c-trampoline (a:Assembler, faddr:Gp, registers:Gp, returns:Gp) :
+  c-call(a, c-trampoline-addr(), [faddr, registers, returns])
+
+extern read_dispatch_table: (ptr<?>, int) -> int
+
+lostanza defn read-dispatch-table-addr () -> ref<Long> :
+  return new Long{addr!(read_dispatch_table) as long}
+
+defn read-dispatch-table (a:Assembler, vmstate:Gp, format:Gp) -> Gp :
+  c-call(a, read-dispatch-table-addr(), [vmstate, format])
+
+extern call_garbage_collector: (ptr<?>, long) -> int
+
+lostanza defn call-garbage-collector-addr () -> ref<Long> :
+  return new Long{addr!(call_garbage_collector) as long}
+
+defn call-garbage-collector (a:Assembler, vmstate:Gp, size:Gp) -> Gp :
+  c-call(a, call-garbage-collector-addr(), [vmstate, size])
+
+extern call_print_stack_trace: (ptr<?>, long) -> int
+
+lostanza defn call-print-stack-trace-addr () -> ref<Long> :
+  return new Long{addr!(call_print_stack_trace) as long}
+
+defn call-print-stack-trace (a:Assembler, vmstate:Gp, stack:Gp) -> Gp :
+  c-call(a, call-print-stack-trace-addr(), [vmstate, stack])
+
+extern retrieve_class_name: (ptr<?>, long) -> int
+
+lostanza defn retrieve-class-name-addr () -> ref<Long> :
+  return new Long{addr!(retrieve_class_name) as long}
+
+defn retrieve-class-name (a:Assembler, vmstate:Gp, stack:Gp) -> Gp :
+  c-call(a, retrieve-class-name-addr(), [vmstate, stack])
+
+val SIZEOF-BYTE = 1
 val SIZEOF-INT  = 4
 val SIZEOF-LONG = 8
 
@@ -98,6 +137,11 @@ val STACK-SIZE-OFFSET = next(stack-offsets, SIZEOF-LONG)
 val STACK-FRAMES-OFFSET = next(stack-offsets, SIZEOF-LONG)
 val STACK-STACK-POINTER-OFFSET = next(stack-offsets, SIZEOF-LONG)
 val STACK-PC-OFFSET = next(stack-offsets, SIZEOF-LONG)
+
+val function-offsets = Counter(0)
+val FUNCTION-NUM-SLOTS-OFFSET = next(function-offsets, SIZEOF-LONG)
+val FUNCTION-CODE-OFFSET = next(function-offsets, SIZEOF-LONG)
+val FUNCTION-SLOTS-OFFSET = next(function-offsets, SIZEOF-LONG)
 
 defn vmstate-reg (a:Assembler, dst:Gp, offset:Int) -> Gp :
   mov(a, dst, MemPtr(vmstate(), offset, SIZEOF-LONG))
@@ -405,6 +449,11 @@ public defn encode (fid:Int, func:VMFunction,
 
   val SYSTEM-RETURN-STUB = -2
 
+  defn BOOLREF (x:Gp) -> Gp :
+    shl(a, x, 3)
+    add(a, x, MARKER-TAG-BITS)
+    x
+
   defn c-call (fptr:Long) :
     push(a, r10())
     push(a, r11())
@@ -413,20 +462,39 @@ public defn encode (fid:Int, func:VMFunction,
     pop(a, r11())
     pop(a, r10())
     
+  defn do-tcall (f:Gp) :
+    debug(a, "CALLING %d\n", f)
+    mov(a, tmp2(), MemPtr(functions(), f, 3, 0, SIZEOF-LONG))
+    debug(a, "CALLING %d %llx\n", f, tmp2())
+    jmp(a, tmp2())
+
+  defn do-call (f:Gp, num-locals:Int) :
+    val end-label = new-label(a)
+    PUSH-FRAME(num-locals, end-label)
+    do-tcall(f)
+    bind(a, end-label)
+
   defn emit-ins-a (opcode:Int, value:Int|Label) :
     switch(opcode) :
       FNENTRY-OPCODE :
         ; TODO: STACK OVERFLOW CHECK
         println("A FNENTRY ?")
         false
-      DISPATCH-OPCODE : println("A DISPATCH ?")
-      TCALL-CLOSURE-OPCODE : println("A TCALL-CLOSURE ?")
+      DISPATCH-OPCODE :
+        println("A DISPATCH ?")
+      TCALL-CLOSURE-OPCODE :
+        println("A TCALL-CLOSURE")
+        LOCAL(tmp1(), value as Int)
+        mov(a, rbx(), MemPtr(tmp1(), SIZEOF-LONG * FUNCTION-CODE-OFFSET - REF-TAG-BITS + 8, SIZEOF-LONG))
+        do-tcall(rbx())
       POP-FRAME-OPCODE :
         println("A POP-FRAME")
         val num-locals = value as Int
         POP-FRAME(num-locals)
-      ENTER-STACK-OPCODE : println("A ENTER-STACK ?")
-      YIELD-OPCODE : println("A YIELD ?")
+      ENTER-STACK-OPCODE :
+        println("A ENTER-STACK ?")
+      YIELD-OPCODE :
+        println("A YIELD ?")
       RETURN-OPCODE :
         println("A RETURN")
         mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
@@ -435,7 +503,8 @@ public defn encode (fid:Int, func:VMFunction,
         ; int64_t retpc = stack_pointer->returnpc;
         ; pc = instructions + retpc;
         false
-      DUMP-OPCODE : println("A DUMP ?")
+      DUMP-OPCODE :
+        println("A DUMP ?")
       LIVE-OPCODE :
         println("A LIVE")
         mov(a, tmp2(), to-long(value as Int))
@@ -443,16 +512,45 @@ public defn encode (fid:Int, func:VMFunction,
         ; stack_pointer->liveness_map = value;
       GOTO-OPCODE : 
         println("A GOTO")
+        debug(a, "GOTO\n")
         jmp(a, value as Label)
-      DISPATCH-METHOD-OPCODE : println("A DISPATCH-METHOD ?")
-      FLUSH-VM-OPCODE : println("A FLUSH-VM ?")
-      C-RSP-OPCODE : println("A C-RSP ?")
-      else : println("MISSING A OPCODE %_" % [opcode])
+      DISPATCH-METHOD-OPCODE :
+        println("A DISPATCH-METHOD ?")
+      FLUSH-VM-OPCODE :
+        println("A FLUSH-VM")
+        SAVE-STATE()
+        SET-LOCAL(value as Int, vmstate())
+      C-RSP-OPCODE :
+        println("A C-RSP ?")
+        ; SAVE-STATE()
+        ; SET-LOCAL(value, stanza_crsp)
+      else :
+        println("MISSING A OPCODE %_" % [opcode])
+
+  defn TAG (dst:Gp, x:Gp, tag:Int) -> Gp:
+    ;MIGHT BE ABLE TO DO THIS WITH ADDRESSING MODE
+    mov(a, dst, x)
+    shl(a, dst, 32)
+    add(a, dst, tag)
+    dst
+    
+  defn DETAG (dst:Gp, x:Gp) -> Gp:
+    mov(a, dst, x)
+    shr(a, dst, 32)
+    dst
 
   defn emit-ins-b (opcode:Int, x:Int, value:Int) :
     switch(opcode) :
-      INT-NOT-OPCODE : println("B INT-NOT ?")
-      INT-NEG-OPCODE : println("B INT-NEG ?")
+      INT-NOT-OPCODE :
+        println("B INT-NOT")
+        not-op(a, LOCAL(tmp1(), value))
+        shr(a, tmp1(), 32)
+        shl(a, tmp1(), 32)
+        SET-LOCAL(x, tmp1())
+      INT-NEG-OPCODE : 
+        println("B INT-NEG")
+        neg(a, LOCAL(tmp1(), value))
+        SET-LOCAL(x, tmp1())
       NOT-OPCODE-BYTE : println("B NOT-BYTE ?")
       NOT-OPCODE-INT : println("B NOT-INT ?")
       NOT-OPCODE-LONG : println("B NOT-LONG ?")
@@ -477,49 +575,76 @@ public defn encode (fid:Int, func:VMFunction,
       CONV-OPCODE-DOUBLE-INT : println("B CONV-DOUBLE-INT ?")
       CONV-OPCODE-DOUBLE-LONG : println("B CONV-DOUBLE-LONG ?")
       CONV-OPCODE-DOUBLE-FLOAT : println("B CONV-DOUBLE-FLOAT ?")
-      TAG-OPCODE-BYTE : println("B TAG-BYTE ?")
-      TAG-OPCODE-CHAR : println("B TAG-CHAR ?")
+      TAG-OPCODE-BYTE :
+        println("B TAG-BYTE ?")
+        debug(a, "TAG-BYTE\n")
+        TAG(tmp2(), LOCAL(tmp1(), value), BYTE-TAG-BITS)
+        SET-LOCAL(x, tmp2())
+      TAG-OPCODE-CHAR :
+        println("B TAG-CHAR ?")
+        debug(a, "TAG-FLOAT\n")
+        TAG(tmp2(), LOCAL(tmp1(), value), CHAR-TAG-BITS)
+        SET-LOCAL(x, tmp2())
       TAG-OPCODE-INT :
         println("B TAG-INT")
         debug(a, "TAG-INT\n")
-        mov(a, tmp1(), LOCAL(value))
-        shl(a, tmp1(), 32)
-        add(a, tmp1(), INT-TAG-BITS)
-        SET-LOCAL(x, tmp1())
-        ; SET-LOCAL(x, ((uint64_t)LOCAL(value) << 32L) + INT_TAG_BITS);
-      TAG-OPCODE-FLOAT : println("B TAG-FLOAT ?")
+        TAG(tmp2(), LOCAL(tmp1(), value), INT-TAG-BITS)
+        SET-LOCAL(x, tmp2())
+      TAG-OPCODE-FLOAT :
+        println("B TAG-FLOAT ?")
+        debug(a, "TAG-FLOAT\n")
+        TAG(tmp2(), LOCAL(tmp1(), value), FLOAT-TAG-BITS)
+        SET-LOCAL(x, tmp2())
       DETAG-OPCODE :
         println("B DETAG")
-        mov(a, tmp2(), LOCAL(value))
-        shr(a, tmp2(), 32)
+        debug(a, "DETAG\n")
+        SET-LOCAL(x, DETAG(tmp2(), LOCAL(tmp1(), value)))
+      DEREF-OPCODE :
+        println("B DEREF ?")
+        LOCAL(tmp2(), value)
+        add(a, tmp2(), 8 - REF-TAG-BITS)
         SET-LOCAL(x, tmp2())
-      DEREF-OPCODE : println("B DEREF ?")
-      GC-OPCODE : println("B GC ?")
-      CLASS-NAME-OPCODE : println("B CLASS-NAME ?")
-      PRINT-STACK-TRACE-OPCODE : println("B PRINT-STACK-TRACE ?")
+      GC-OPCODE :
+        println("B GC")
+        LOCAL(tmp1(), value)
+        SAVE-STATE()
+        call-garbage-collector(a, vmstate(), tmp1())
+        RESTORE-STATE()
+        SET-LOCAL(x, rax())
+      CLASS-NAME-OPCODE :
+        println("B CLASS-NAME ?")
+        SET-LOCAL(x, retrieve-class-name(a, vmstate(), LOCAL(tmp1(), value)))
+      PRINT-STACK-TRACE-OPCODE :
+        println("B PRINT-STACK-TRACE")
+        SET-LOCAL(x, call-print-stack-trace(a, vmstate(), LOCAL(tmp1(), value)))
       GET-REG-OPCODE :
         println("B GET-REG %_ %_" % [x value])
         debug(a, "GET-REG %llx\n" GET-REG(tmp1(), value))
         SET-LOCAL(x, GET-REG(tmp1(), value))
-      else : println("MISSING B OPCODE %_" % [opcode])
+      else :
+        println("MISSING B OPCODE %_" % [opcode])
+
   defn emit-ins-c (opcode:Int, x:Int, value:Int) :
     switch(opcode) :
-      TCALL-OPCODE-LOCAL : println("C TCALL-LOCAL ?")
-      TCALL-OPCODE-CODE : println("C TCALL-CODE ?")
-      CALL-OPCODE-LOCAL : println("C CALL-LOCAL ?")
+      TCALL-OPCODE-LOCAL :
+        println("C TCALL-LOCAL")
+        do-tcall(LOCAL(rbx(), value))
+      TCALL-OPCODE-CODE :
+        println("C TCALL-CODE")
+        do-tcall(CONST(rbx(), value))
+      CALL-OPCODE-LOCAL :
+        println("C CALL-LOCAL %_" % [value])
+        debug(a, "CALL-LOCAL\n")
+        do-call(LOCAL(rbx(), value), x)
       CALL-OPCODE-CODE :
         println("C CALL-CODE %_" % [value])
-        val num-locals = x
-        val fid = value
-        val end-label = new-label(a)
-        PUSH-FRAME(num-locals, end-label)
-        mov(a, rax(), MemPtr(functions(), fid * SIZEOF-LONG, SIZEOF-LONG))
-        debug(a, "CALLING %llx\n", rax())
-        mov(a, rax(), MemPtr(functions(), fid * SIZEOF-LONG, SIZEOF-LONG))
-        jmp(a, rax())
-        bind(a, end-label)
-        debug(a, "AFTER END\n")
-      CALL-CLOSURE-OPCODE : println("C CALL-CLOSURE ?")
+        debug(a, "CALL-CODE\n")
+        do-call(CONST(rbx(), value), x)
+      CALL-CLOSURE-OPCODE :
+        println("C CALL-CLOSURE")
+        LOCAL(tmp1(), value)
+        mov(a, rbx(), MemPtr(tmp1(), SIZEOF-LONG * FUNCTION-CODE-OFFSET - REF-TAG-BITS + 8, SIZEOF-LONG))
+        do-call(rbx(), x)
       CALLC-OPCODE-LOCAL :
         println("C CALLC-LOCAL")
         val end-label = new-label(a)
@@ -527,13 +652,14 @@ public defn encode (fid:Int, func:VMFunction,
         PUSH-FRAME(num-locals, end-label)
         SAVE-STATE()
         val faddr = LOCAL(value)
-        c-trampoline(a, [faddr, registers(), registers()])
+        c-trampoline(a, faddr, registers(), registers())
         RESTORE-STATE()
         mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
         jmp(a, tmp1())
         POP-FRAME(num-locals)
         bind(a, end-label)
-      TYPEOF-OPCODE : println("C TYPEOF ?")
+      TYPEOF-OPCODE :
+        println("C TYPEOF ?")
       SET-REG-OPCODE-LOCAL :
         println("C SET-REG-LOCAL")
         debug(a, "SET-REG-LOCAL %d\n", CONST(x))
@@ -556,7 +682,7 @@ public defn encode (fid:Int, func:VMFunction,
         ; dump-memory-64(a, vmstate(), 17L)
         ; debug(a, "OFFSETS %llx\n", data-offsets())
         ; dump-memory-32(a, data-offsets(), 8L)
-        mov(a, ebx(), MemPtr(data-offsets(), value * SIZEOF-INT, SIZEOF-INT)) ; data_offsets[value]
+        mov(a, ebx(), MemPtr(data-offsets(), CONST(tmp1(), value), 2, 0, SIZEOF-INT)) ; data_offsets[value]
         lea(a, tmp1(), MemPtr(data-mem(), ebx(), 3, 0, SIZEOF-LONG))
         SET-REG(x, tmp1())
         debug(a, "SET-REG-DATA %x %llx\n" CONST(tmp2(), x) tmp1())
@@ -579,14 +705,10 @@ public defn encode (fid:Int, func:VMFunction,
       SET-OPCODE-DATA : println("C SET-DATA ?")
       SET-OPCODE-CONST :
         println("C SET-CONST")
-        mov(a, tmp2(), MemPtr(const-table(), value * SIZEOF-LONG, SIZEOF-LONG))
+        mov(a, tmp2(), MemPtr(const-table(), CONST(tmp1(), value), 3, 0, SIZEOF-LONG))
         SET-LOCAL(x, tmp2())
-      else : println("MISSING C OPCODE %_" % [opcode])
-
-  defn BOOLREF (x:Gp) -> Gp :
-    shl(a, x, 3)
-    add(a, x, MARKER-TAG-BITS)
-    x
+      else :
+        println("MISSING C OPCODE %_" % [opcode])
 
   defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Label|Int) :
     switch(opcode) :
@@ -603,7 +725,7 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, tmp1())
       INT-SUB-OPCODE :
         println("C INT-SUB")
-        add(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        sub(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
         debug(a, "INT-SUB %llx\n" tmp1())
         SET-LOCAL(x, tmp1())
       INT-MUL-OPCODE : println("C INT-MUL ?")
@@ -622,8 +744,9 @@ public defn encode (fid:Int, func:VMFunction,
       EQ-OPCODE-REF-REF :
         println("C EQ-REF-REF")
         cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
-        set-e(a, rax())
-        SET-LOCAL(x, BOOLREF(rax()))
+        set-e(a, tmp2())
+        debug(a, "EQ? %d\n" tmp2())
+        SET-LOCAL(x, BOOLREF(tmp2()))
       EQ-OPCODE-REF : println("C EQ-REF ?")
       EQ-OPCODE-BYTE : println("C EQ-BYTE ?")
       EQ-OPCODE-INT : println("C EQ-INT ?")
@@ -722,7 +845,7 @@ public defn encode (fid:Int, func:VMFunction,
         PUSH-FRAME(num_locals, end-label)
         SAVE-STATE()
         mov(a, tmp1(), faddr)
-        c-trampoline(a, [tmp1(), registers(), registers()])
+        c-trampoline(a, tmp1(), registers(), registers())
         RESTORE-STATE()
         ; debug(a, "JMP RETURN\n")
         ; mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
@@ -746,7 +869,8 @@ public defn encode (fid:Int, func:VMFunction,
       SET-OPCODE-DATA : println("D SET-DATA ?")
       SET-OPCODE-CONST : println("D SET-CONST ?")
       SET-OPCODE-UNSIGNED : println("D SET-UNSIGNED ?")
-      else : println("MISSING D OPCODE %_" % [opcode])
+      else :
+        println("MISSING D OPCODE %_" % [opcode])
 
   defn emit-ins-e (opcode:Int, x:Int, y:Int, z:Int, value:Int) :
     switch(opcode) :
@@ -758,21 +882,30 @@ public defn encode (fid:Int, func:VMFunction,
       STORE-OPCODE-8-VAR-OFFSET : println("E STORE-8-VAR-OFFSET ?")
       LOAD-OPCODE-1 : 
         println("D LOAD-1")
-        mov(a, tmp2(), MemPtr(LOCAL(y), value * SIZEOF-LONG, 1))
+        mov(a, tmp2(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 3, 0, SIZEOF-BYTE))
         SET-LOCAL(x, tmp2())
       LOAD-OPCODE-4 : 
         println("D LOAD-4")
-        mov(a, tmp2(), MemPtr(LOCAL(y), value * SIZEOF-LONG, 4))
+        mov(a, tmp2(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 3, 0, SIZEOF-INT))
         SET-LOCAL(x, tmp2())
       LOAD-OPCODE-8 :
         println("D LOAD-8")
-        mov(a, tmp2(), MemPtr(LOCAL(y), value * SIZEOF-LONG, 8))
+        mov(a, tmp2(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 3, 0, SIZEOF-LONG))
         SET-LOCAL(x, tmp2())
       LOAD-OPCODE-1-VAR-OFFSET : println("E LOAD-1-VAR-OFFSET ?")
       LOAD-OPCODE-4-VAR-OFFSET : println("E LOAD-4-VAR-OFFSET ?")
       LOAD-OPCODE-8-VAR-OFFSET : println("E LOAD-8-VAR-OFFSET ?")
-      else : println("MISSING E OPCODE %_" % [opcode])
+      else :
+        println("MISSING E OPCODE %_" % [opcode])
 
+  defn jump-op-reg (x:Gp, y:Gp, f:(Assembler, Label) -> False, n1:Label, n2:Label) :
+    cmp(a, x, y)
+    f(a,  n1)
+    jmp(a, n2)
+    
+  defn jump-op (x:Int, y:Int, f:(Assembler, Label) -> False, n1:Label, n2:Label) :
+    jump-op-reg(LOCAL(tmp1(), x), LOCAL(tmp2(), y), f, n1, n2)
+    
   defn emit-ins-f (opcode:Int, x:Int, y:Int, n1:Label, n2:Label) :
     switch(opcode) :
       JUMP-TAGBITS-OPCODE :
@@ -782,17 +915,32 @@ public defn encode (fid:Int, func:VMFunction,
         cmp(a, tmp1(), tmp2())
         je(a, n1)
         jmp(a, n2)
-      JUMP-TAGWORD-OPCODE : println("F JUMP-TAGWORD ?")
-      JUMP-SET-OPCODE : println("F JUMP-SET ?")
-      JUMP-INT-LT-OPCODE : println("F JUMP-INT-LT ?")
-      JUMP-INT-GT-OPCODE : println("F JUMP-INT-GT ?")
-      JUMP-INT-LE-OPCODE : println("F JUMP-INT-LE ?")
-      JUMP-INT-GE-OPCODE : println("F JUMP-INT-GE ?")
+      JUMP-TAGWORD-OPCODE :
+        println("F JUMP-TAGWORD ?")
+      JUMP-SET-OPCODE :
+        println("F JUMP-SET")
+        debug(a, "JUMP-SET %llx\n" LOCAL(tmp1(), x))
+        jump-op-reg(LOCAL(tmp1(), x), CONST(tmp2(), 0), jne, n1, n2)
+      JUMP-INT-LT-OPCODE : 
+        println("F JUMP-LT-REF")
+        debug(a, "JUMP-LT-REF %llx %llx\n" LOCAL(tmp1(), x), LOCAL(tmp2(), y))
+        jump-op(x, y, jl, n1, n2)
+      JUMP-INT-GT-OPCODE : 
+        println("F JUMP-GT-REF")
+        debug(a, "JUMP-GT-REF %llx %llx\n" LOCAL(tmp1(), x), LOCAL(tmp2(), y))
+        jump-op(x, y, jg, n1, n2)
+      JUMP-INT-LE-OPCODE : 
+        println("F JUMP-LE-REF")
+        debug(a, "JUMP-LE-REF %llx %llx\n" LOCAL(tmp1(), x), LOCAL(tmp2(), y))
+        jump-op(x, y, jle, n1, n2)
+      JUMP-INT-GE-OPCODE : 
+        println("F JUMP-GE-REF")
+        debug(a, "JUMP-GE-REF %llx %llx\n" LOCAL(tmp1(), x), LOCAL(tmp2(), y))
+        jump-op(x, y, jge, n1, n2)
       JUMP-EQ-OPCODE-REF :
         println("F JUMP-EQ-REF")
-        cmp(a, LOCAL(tmp1(), x), LOCAL(tmp2(), y))
-        je(a,  n1)
-        jmp(a, n2)
+        debug(a, "JUMP-EQ-REF %llx %llx\n" LOCAL(tmp1(), x), LOCAL(tmp2(), y))
+        jump-op(x, y, je, n1, n2)
       JUMP-EQ-OPCODE-BYTE : println("F JUMP-EQ-BYTE ?")
       JUMP-EQ-OPCODE-INT : println("F JUMP-EQ-INT ?")
       JUMP-EQ-OPCODE-LONG : println("F JUMP-EQ-LONG ?")
@@ -832,7 +980,8 @@ public defn encode (fid:Int, func:VMFunction,
       JUMP-UGE-OPCODE-BYTE : println("F JUMP-UGE-BYTE ?")
       JUMP-UGE-OPCODE-INT : println("F JUMP-UGE-INT ?")
       JUMP-UGE-OPCODE-LONG : println("F JUMP-UGE-LONG ?")
-      else : println("MISSING F OPCODE %_" % [opcode])
+      else :
+        println("MISSING F OPCODE %_" % [opcode])
 
   defn emit-ins-targets (dests:Tuple<Label>) :
     ; TODO:
