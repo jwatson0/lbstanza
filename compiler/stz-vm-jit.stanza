@@ -485,6 +485,12 @@ public defn encode (fid:Int, func:VMFunction,
         false
       DISPATCH-OPCODE :
         println("A DISPATCH XXX")
+        val tgts = new-label(a)
+        read-dispatch-table(a, vmstate(), CONST(tmp1(), value as Int))
+        mov(a, tmp2(), MemPtr(tgts, rax(), 2, 0, SIZEOF-INT))
+        mov(a, tmp2(), MemPtr(functions(), tmp2(), 3, 0, SIZEOF-LONG))
+        jmp(a, tmp2())
+        bind(a, tgts)
       TCALL-CLOSURE-OPCODE :
         println("A TCALL-CLOSURE")
         LOCAL(tmp1(), value as Int)
@@ -495,9 +501,31 @@ public defn encode (fid:Int, func:VMFunction,
         val num-locals = value as Int
         POP-FRAME(num-locals)
       ENTER-STACK-OPCODE :
-        println("A ENTER-STACK XXX")
+        println("A ENTER-STACK")
+        ;Save current stack
+        mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), stack-pointer())
+        ;Load next stack
+        mov(a, current-stack(), LOCAL(tmp1(), value as Int))
+        untag-stack(a, stk(), current-stack())
+        mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG))
+        ;Load starting address
+        mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
+        jmp(a, tmp1())
       YIELD-OPCODE :
-        println("A YIELD XXX")
+        println("A YIELD")
+        val continue-label = new-label(a)
+        ;Save current stack
+        mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), stack-pointer())
+        lea(a, tmp2(), MemPtr(continue-label, 0, SIZEOF-LONG))
+        mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), tmp2())
+        ;Load next stack
+        mov(a, current-stack(), LOCAL(tmp1(), value as Int))
+        untag-stack(a, stk(), current-stack())
+        mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG))
+        ;Load starting address
+        mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
+        jmp(a, tmp1())
+        bind(a, continue-label)
       RETURN-OPCODE :
         println("A RETURN")
         mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
@@ -518,7 +546,18 @@ public defn encode (fid:Int, func:VMFunction,
         debug(a, "GOTO\n")
         jmp(a, value as Label)
       DISPATCH-METHOD-OPCODE :
-        println("A DISPATCH-METHOD XXX")
+        println("A DISPATCH-METHOD")
+        val code-label = new-label(a)
+        val tgts = new-label(a)
+        read-dispatch-table(a, vmstate(), CONST(tmp1(), value as Int))
+        cmp(a, rax(), CONST(tmp1(), 2))
+        jge(a, code-label)
+        mov(a, tmp2(), MemPtr(tgts, rax(), 2, 0, SIZEOF-INT))
+        mov(a, tmp2(), MemPtr(functions(), tmp2(), 3, 0, SIZEOF-LONG))
+        jmp(a, tmp2())
+        bind(a, code-label)
+        mov(a, tmp2(), MemPtr(functions(), tmp2(), 3, -2, SIZEOF-LONG))
+        jmp(a, tmp2())
       FLUSH-VM-OPCODE :
         println("A FLUSH-VM")
         SAVE-STATE()
@@ -540,6 +579,10 @@ public defn encode (fid:Int, func:VMFunction,
   defn DETAG (dst:Gp, x:Gp) -> Gp:
     mov(a, dst, x)
     shr(a, dst, 32)
+    dst
+
+  defn ptr-to-ref (dst:Gp, p:Gp) -> Gp :
+    lea(a, dst, MemPtr(p, REF-TAG-BITS, SIZEOF-LONG))
     dst
 
   defn emit-ins-b (opcode:Int, x:Int, value:Int) :
@@ -734,7 +777,9 @@ public defn encode (fid:Int, func:VMFunction,
         POP-FRAME(num-locals)
         bind(a, end-label)
       TYPEOF-OPCODE :
-        println("C TYPEOF XXX")
+        println("C TYPEOF")
+        read-dispatch-table(a, vmstate(), CONST(tmp2(), value))
+        SET-LOCAL(x, rax())
       SET-REG-OPCODE-LOCAL :
         println("C SET-REG-LOCAL")
         debug(a, "SET-REG-LOCAL %d\n", CONST(x))
@@ -778,7 +823,15 @@ public defn encode (fid:Int, func:VMFunction,
         mov(a, rbx(), MemPtr(const-table(), CONST(tmp1(), value), 3, 0, SIZEOF-LONG))
         SET-REG(x, rbx())
       SET-REG-OPCODE-UNSIGNED :
-        println("C SET-REG-UNSIGNED XXX")
+        println("C SET-REG-UNSIGNED")
+        ;TODO: CHECK
+        mov(a, tmp1(), to-long(value))
+        SET-REG(x, tmp1())
+      SET-REG-OPCODE-SIGNED :
+        println("C SET-REG-UNSIGNED")
+        ;TODO: CHECK
+        mov(a, tmp1(), to-long(value))
+        SET-REG(x, tmp1())
       SET-OPCODE-LOCAL :
         println("C SET-LOCAL")
         SET-LOCAL(x, LOCAL(value))
@@ -809,7 +862,14 @@ public defn encode (fid:Int, func:VMFunction,
       else :
         println("MISSING C OPCODE %_" % [opcode])
 
-  defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Label|Int) :
+  defn emit-ins-c (opcode:Int, x:Label, y:Int, value:Int) :
+    switch(opcode) :
+      RESERVE-OPCODE-LOCAL :
+        println("C RESERVE-LOCAL XXX")
+      RESERVE-OPCODE-CONST :
+        println("C RESERVE-CONST XXX")
+
+  defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Label) :
     switch(opcode) :
       JUMP-REG-OPCODE :
         val reg = x
@@ -817,469 +877,476 @@ public defn encode (fid:Int, func:VMFunction,
         cmp(a, GET-REG(tmp1(), reg), CONST(tmp2(), arity))
         je(a, value as Label)
         println("C JUMP-REG")
+
+  defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Int) :
+    switch(opcode) :
       INT-ADD-OPCODE :
         println("C INT-ADD")
-        add(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        add(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         debug(a, "INT-ADD %llx\n" tmp1())
         SET-LOCAL(x, tmp1())
       INT-SUB-OPCODE :
         println("C INT-SUB")
-        sub(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        sub(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         debug(a, "INT-SUB %llx\n" tmp1())
         SET-LOCAL(x, tmp1())
       INT-MUL-OPCODE :
         println("C INT-MUL")
         shr(a, LOCAL(tmp1(), y), 32)
-        imul(a, tmp1(), LOCAL(tmp2(), value as Int))
+        imul(a, tmp1(), LOCAL(tmp2(), value))
         debug(a, "INT-MUL %llx\n" tmp1())
         SET-LOCAL(x, tmp1())
       INT-DIV-OPCODE :
         println("C INT-DIV")
-        div(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        div(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         shl(a, tmp1(), 32)
         debug(a, "INT-DIV %llx\n" tmp1())
         SET-LOCAL(x, tmp1())
       INT-MOD-OPCODE :
         println("C INT-MOD")
         ;TODO: WHAT'S MOD?
-        div(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        div(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         shl(a, tmp1(), 32)
         debug(a, "INT-MOD %llx\n" tmp1())
         SET-LOCAL(x, tmp1())
       INT-AND-OPCODE :
         println("C INT-AND")
-        and-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        and-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         debug(a, "INT-AND %llx\n" tmp1())
         SET-LOCAL(x, tmp1())
       INT-OR-OPCODE :
         println("C INT-OR")
-        or-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        or-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         debug(a, "INT-OR %llx\n" tmp1())
         SET-LOCAL(x, tmp1())
       INT-XOR-OPCODE :
         println("C INT-XOR")
-        xor-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        xor-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         debug(a, "INT-XOR %llx\n" tmp1())
         SET-LOCAL(x, tmp1())
       INT-SHL-OPCODE :
         println("C INT-SHL")
-        shl(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        shl(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         debug(a, "INT-SHL %llx\n" tmp1())
         SET-LOCAL(x, tmp1())
       INT-SHR-OPCODE :
         println("C INT-SHR")
-        shr(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        shr(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         debug(a, "INT-SHR %llx\n" tmp1())
         SET-LOCAL(x, tmp1())
       INT-ASHR-OPCODE :
         println("C INT-ASHR")
-        ashr(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        ashr(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         debug(a, "INT-ASHR %llx\n" tmp1())
         SET-LOCAL(x, tmp1())
       INT-LT-OPCODE :
         println("C INT-LT")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-l(a, tmp2())
         debug(a, "LT? %d\n" tmp2())
         SET-LOCAL(x, BOOLREF(tmp2()))
       INT-GT-OPCODE :
         println("C INT-GT")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-g(a, tmp2())
         debug(a, "LT? %d\n" tmp2())
         SET-LOCAL(x, BOOLREF(tmp2()))
       INT-LE-OPCODE :
         println("C INT-LE")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-le(a, tmp2())
         debug(a, "LE? %d\n" tmp2())
         SET-LOCAL(x, BOOLREF(tmp2()))
       INT-GE-OPCODE :
         println("C INT-GE")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-ge(a, tmp2())
         debug(a, "GE? %d\n" tmp2())
         SET-LOCAL(x, BOOLREF(tmp2()))
       EQ-OPCODE-REF-REF :
         println("C EQ-REF-REF")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-e(a, tmp2())
         debug(a, "EQ? %d\n" tmp2())
         SET-LOCAL(x, BOOLREF(tmp2()))
       EQ-OPCODE-REF :
         println("C EQ-REF")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-e(a, tmp2())
         SET-LOCAL(x, tmp2())
       EQ-OPCODE-BYTE :
         println("C EQ-BYTE")
-        cmp(a, LOCAL(al(), y), LOCAL(bl(), value as Int))
+        cmp(a, LOCAL(al(), y), LOCAL(bl(), value))
         set-e(a, tmp2())
         SET-LOCAL(x, tmp2())
       EQ-OPCODE-INT :
         println("C EQ-INT")
-        cmp(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        cmp(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         set-e(a, tmp2())
         SET-LOCAL(x, tmp2())
       EQ-OPCODE-LONG :
         println("C EQ-LONG")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-e(a, tmp2())
         SET-LOCAL(x, tmp2())
       EQ-OPCODE-FLOAT :
         println("C EQ-FLOAT")
-        ucomiss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value as Int))
+        ucomiss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
         set-e(a, tmp2())
         SET-LOCAL(x, tmp2())
       EQ-OPCODE-DOUBLE :
         println("C EQ-DOUBLE")
-        ucomisd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value as Int))
+        ucomisd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
         set-e(a, tmp2())
         SET-LOCAL(x, tmp2())
       NE-OPCODE-REF-REF :
         println("C NE-REF-REF")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-ne(a, tmp2())
         debug(a, "EQ? %d\n" tmp2())
         SET-LOCAL(x, BOOLREF(tmp2()))
       NE-OPCODE-REF :
         println("C NE-REF")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-ne(a, tmp2())
         SET-LOCAL(x, tmp2())
       NE-OPCODE-BYTE :
         println("C NE-BYTE")
-        cmp(a, LOCAL(al(), y), LOCAL(bl(), value as Int))
+        cmp(a, LOCAL(al(), y), LOCAL(bl(), value))
         set-ne(a, tmp2())
         SET-LOCAL(x, tmp2())
       NE-OPCODE-INT :
         println("C NE-INT")
-        cmp(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        cmp(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         set-ne(a, tmp2())
         SET-LOCAL(x, tmp2())
       NE-OPCODE-LONG :
         println("C NE-LONG")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-ne(a, tmp2())
         SET-LOCAL(x, tmp2())
       NE-OPCODE-FLOAT :
         println("C NE-FLOAT")
-        ucomiss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value as Int))
+        ucomiss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
         set-ne(a, tmp2())
         SET-LOCAL(x, tmp2())
       NE-OPCODE-DOUBLE :
         println("C NE-DOUBLE")
-        ucomisd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value as Int))
+        ucomisd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
         set-ne(a, tmp2())
         SET-LOCAL(x, tmp2())
       ADD-OPCODE-BYTE :
         println("C ADD-BYTE")
-        add(a, LOCAL(al(), y), LOCAL(bl(), value as Int))
+        add(a, LOCAL(al(), y), LOCAL(bl(), value))
         SET-LOCAL(x, al())
       ADD-OPCODE-INT :
         println("C ADD-INT")
-        add(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        add(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         SET-LOCAL(x, eax())
       ADD-OPCODE-LONG :
         println("C ADD-LONG")
-        add(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        add(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         SET-LOCAL(x, tmp1())
       ADD-OPCODE-FLOAT :
         println("C ADD-FLOAT")
-        addss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value as Int))
+        addss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
         SET-LOCAL-FLOAT(x, xmm0())
       ADD-OPCODE-DOUBLE :
         println("C ADD-DOUBLE")
-        addsd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value as Int))
+        addsd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
         SET-LOCAL-DOUBLE(x, xmm0())
       SUB-OPCODE-BYTE :
         println("C SUB-BYTE")
-        sub(a, LOCAL(al(), y), LOCAL(bl(), value as Int))
+        sub(a, LOCAL(al(), y), LOCAL(bl(), value))
         SET-LOCAL(x, al())
       SUB-OPCODE-INT :
         println("C SUB-INT")
-        sub(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        sub(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         SET-LOCAL(x, eax())
       SUB-OPCODE-LONG :
         println("C SUB-LONG")
-        sub(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        sub(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         SET-LOCAL(x, tmp1())
       SUB-OPCODE-FLOAT :
         println("C SUB-FLOAT")
-        subss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value as Int))
+        subss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
         SET-LOCAL-FLOAT(x, xmm0())
       SUB-OPCODE-DOUBLE :
         println("C SUB-DOUBLE")
-        subsd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value as Int))
+        subsd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
         SET-LOCAL-DOUBLE(x, xmm0())
       MUL-OPCODE-BYTE :
         println("C MUL-BYTE")
-        imul(a, LOCAL(al(), y), LOCAL(bl(), value as Int))
+        imul(a, LOCAL(al(), y), LOCAL(bl(), value))
         SET-LOCAL(x, al())
       MUL-OPCODE-INT :
         println("C MUL-INT")
-        imul(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        imul(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         SET-LOCAL(x, eax())
       MUL-OPCODE-LONG :
         println("C MUL-LONG")
-        imul(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        imul(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         SET-LOCAL(x, tmp1())
       MUL-OPCODE-FLOAT :
         println("C MUL-FLOAT")
-        mulss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value as Int))
+        mulss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
         SET-LOCAL-FLOAT(x, xmm0())
       MUL-OPCODE-DOUBLE :
         println("C MUL-DOUBLE")
-        mulsd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value as Int))
+        mulsd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
         SET-LOCAL-DOUBLE(x, xmm0())
       DIV-OPCODE-BYTE :
         println("C DIV-BYTE")
-        div(a, LOCAL(al(), y), LOCAL(bl(), value as Int))
+        div(a, LOCAL(al(), y), LOCAL(bl(), value))
         SET-LOCAL(x, al())
       DIV-OPCODE-INT :
         println("C DIV-INT")
-        div(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        div(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         SET-LOCAL(x, eax())
       DIV-OPCODE-LONG :
         println("C DIV-LONG")
-        div(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        div(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         SET-LOCAL(x, tmp1())
       DIV-OPCODE-FLOAT :
         println("C DIV-FLOAT")
-        divss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value as Int))
+        divss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
         SET-LOCAL-FLOAT(x, xmm0())
       DIV-OPCODE-DOUBLE :
         println("C DIV-DOUBLE")
-        divsd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value as Int))
+        divsd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
         SET-LOCAL-DOUBLE(x, xmm0())
       MOD-OPCODE-BYTE :
         println("C MOD-BYTE")
-        mod(a, LOCAL(al(), y), LOCAL(bl(), value as Int))
+        mod(a, LOCAL(al(), y), LOCAL(bl(), value))
         SET-LOCAL(x, al())
       MOD-OPCODE-INT :
         println("C MOD-INT")
-        mod(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        mod(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         SET-LOCAL(x, eax())
       MOD-OPCODE-LONG :
         println("C MOD-LONG")
-        mod(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        mod(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         SET-LOCAL(x, tmp1())
       AND-OPCODE-BYTE :
         println("C AND-BYTE")
-        and-op(a, LOCAL(al(), y), LOCAL(bl(), value as Int))
+        and-op(a, LOCAL(al(), y), LOCAL(bl(), value))
         SET-LOCAL(x, al())
       AND-OPCODE-INT :
         println("C AND-INT")
-        and-op(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        and-op(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         SET-LOCAL(x, eax())
       AND-OPCODE-LONG :
         println("C AND-LONG")
-        and-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        and-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         SET-LOCAL(x, tmp1())
       OR-OPCODE-BYTE :
         println("C OR-BYTE")
-        or-op(a, LOCAL(al(), y), LOCAL(bl(), value as Int))
+        or-op(a, LOCAL(al(), y), LOCAL(bl(), value))
         SET-LOCAL(x, al())
       OR-OPCODE-INT :
         println("C OR-INT")
-        or-op(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        or-op(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         SET-LOCAL(x, eax())
       OR-OPCODE-LONG :
         println("C OR-LONG")
-        or-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        or-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         SET-LOCAL(x, tmp1())
       XOR-OPCODE-BYTE :
         println("C XOR-BYTE")
-        xor-op(a, LOCAL(al(), y), LOCAL(bl(), value as Int))
+        xor-op(a, LOCAL(al(), y), LOCAL(bl(), value))
         SET-LOCAL(x, al())
       XOR-OPCODE-INT :
         println("C XOR-INT")
-        xor-op(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        xor-op(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         SET-LOCAL(x, eax())
       XOR-OPCODE-LONG :
         println("C XOR-LONG")
-        xor-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        xor-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         SET-LOCAL(x, tmp1())
       SHL-OPCODE-BYTE :
         println("C SHL-BYTE")
-        shl(a, LOCAL(al(), y), LOCAL(bl(), value as Int))
+        shl(a, LOCAL(al(), y), LOCAL(bl(), value))
         SET-LOCAL(x, al())
       SHL-OPCODE-INT :
         println("C SHL-INT")
-        shl(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        shl(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         SET-LOCAL(x, eax())
       SHL-OPCODE-LONG :
         println("C SHL-LONG")
-        shl(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        shl(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         SET-LOCAL(x, tmp1())
       SHR-OPCODE-BYTE :
         println("C SHR-BYTE")
-        shr(a, LOCAL(al(), y), LOCAL(bl(), value as Int))
+        shr(a, LOCAL(al(), y), LOCAL(bl(), value))
         SET-LOCAL(x, al())
       SHR-OPCODE-INT :
         println("C SHR-INT")
-        shr(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        shr(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         SET-LOCAL(x, eax())
       SHR-OPCODE-LONG :
         println("C SHR-LONG")
-        shr(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        shr(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         SET-LOCAL(x, tmp1())
       ASHR-OPCODE-INT :
         println("C ASHR-INT")
-        ashr(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        ashr(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         SET-LOCAL(x, eax())
       ASHR-OPCODE-LONG :
         println("C ASHR-LONG")
-        ashr(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        ashr(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         SET-LOCAL(x, tmp1())
       LT-OPCODE-INT :
         println("C LT-INT")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-l(a, tmp1())
         SET-LOCAL(x, tmp1())
       LT-OPCODE-LONG :
         println("C LT-LONG")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-l(a, tmp1())
         SET-LOCAL(x, tmp1())
       LT-OPCODE-FLOAT :
         println("C LT-FLOAT")
-        ucomiss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value as Int))
+        ucomiss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
         set-l(a, tmp1())
         SET-LOCAL(x, tmp1())
       LT-OPCODE-DOUBLE :
         println("C LT-DOUBLE")
-        ucomisd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value as Int))
+        ucomisd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
         set-l(a, tmp1())
         SET-LOCAL(x, tmp1())
       GT-OPCODE-INT :
         println("C GT-INT")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-g(a, tmp1())
         SET-LOCAL(x, tmp1())
       GT-OPCODE-LONG :
         println("C GT-LONG")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-g(a, tmp1())
         SET-LOCAL(x, tmp1())
       GT-OPCODE-FLOAT :
         println("C GT-FLOAT")
-        ucomiss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value as Int))
+        ucomiss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
         set-g(a, tmp1())
         SET-LOCAL(x, tmp1())
       GT-OPCODE-DOUBLE :
         println("C GT-DOUBLE")
-        ucomisd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value as Int))
+        ucomisd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
         set-g(a, tmp1())
         SET-LOCAL(x, tmp1())
       LE-OPCODE-INT :
         println("C LE-INT")
-        cmp(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        cmp(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         set-le(a, tmp1())
         SET-LOCAL(x, tmp1())
       LE-OPCODE-LONG :
         println("C LE-LONG")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-le(a, tmp1())
         SET-LOCAL(x, tmp1())
       LE-OPCODE-FLOAT :
         println("C LE-FLOAT")
-        ucomiss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value as Int))
+        ucomiss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
         set-le(a, tmp1())
         SET-LOCAL(x, tmp1())
       LE-OPCODE-DOUBLE :
         println("C LE-DOUBLE")
-        ucomisd(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value as Int))
+        ucomisd(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
         set-le(a, tmp1())
         SET-LOCAL(x, tmp1())
       GE-OPCODE-INT :
         println("C GE-INT")
-        cmp(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        cmp(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         set-ge(a, tmp1())
         SET-LOCAL(x, tmp1())
       GE-OPCODE-LONG :
         println("C GE-LONG")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-ge(a, tmp1())
         SET-LOCAL(x, tmp1())
       GE-OPCODE-FLOAT :
         println("C GE-FLOAT")
-        ucomiss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value as Int))
+        ucomiss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
         set-ge(a, tmp1())
         SET-LOCAL(x, tmp1())
       GE-OPCODE-DOUBLE :
         println("C GE-DOUBLE")
-        ucomisd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value as Int))
+        ucomisd(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
         set-ge(a, tmp1())
         SET-LOCAL(x, tmp1())
       ULT-OPCODE-BYTE :
         println("C ULT-BYTE")
-        cmp(a, LOCAL(al(), y), LOCAL(bl(), value as Int))
+        cmp(a, LOCAL(al(), y), LOCAL(bl(), value))
         set-b(a, tmp1())
         SET-LOCAL(x, tmp1())
       ULT-OPCODE-INT :
         println("C ULT-INT")
-        cmp(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        cmp(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         set-b(a, tmp1())
         SET-LOCAL(x, tmp1())
       ULT-OPCODE-LONG :
         println("C ULT-LONG")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-b(a, tmp1())
         SET-LOCAL(x, tmp1())
       ULE-OPCODE-BYTE :
         println("C ULE-BYTE")
-        cmp(a, LOCAL(al(), y), LOCAL(bl(), value as Int))
+        cmp(a, LOCAL(al(), y), LOCAL(bl(), value))
         set-be(a, tmp1())
         SET-LOCAL(x, tmp1())
       ULE-OPCODE-INT :
         println("C ULE-INT")
-        cmp(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        cmp(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         set-be(a, tmp1())
         SET-LOCAL(x, tmp1())
       ULE-OPCODE-LONG :
         println("C ULE-LONG")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-be(a, tmp1())
         SET-LOCAL(x, tmp1())
       UGT-OPCODE-BYTE :
         println("C UGT-BYTE")
-        cmp(a, LOCAL(al(), y), LOCAL(bl(), value as Int))
+        cmp(a, LOCAL(al(), y), LOCAL(bl(), value))
         set-a(a, tmp1())
         SET-LOCAL(x, tmp1())
       UGT-OPCODE-INT :
         println("C UGT-INT")
-        cmp(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        cmp(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         set-a(a, tmp1())
         SET-LOCAL(x, tmp1())
       UGT-OPCODE-LONG :
         println("C UGT-LONG")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-a(a, tmp1())
         SET-LOCAL(x, tmp1())
       UGE-OPCODE-BYTE :
         println("C UGE-BYTE")
-        cmp(a, LOCAL(al(), y), LOCAL(bl(), value as Int))
+        cmp(a, LOCAL(al(), y), LOCAL(bl(), value))
         set-ae(a, tmp1())
         SET-LOCAL(x, tmp1())
       UGE-OPCODE-INT :
         println("C UGE-INT")
-        cmp(a, LOCAL(eax(), y), LOCAL(ebx(), value as Int))
+        cmp(a, LOCAL(eax(), y), LOCAL(ebx(), value))
         set-ae(a, tmp1())
         SET-LOCAL(x, tmp1())
       UGE-OPCODE-LONG :
         println("C UGE-LONG")
-        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value as Int))
+        cmp(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         set-ae(a, tmp1())
         SET-LOCAL(x, tmp1())
-      RESERVE-OPCODE-LOCAL :
-        println("C RESERVE-LOCAL XXX")
-      RESERVE-OPCODE-CONST :
-        println("C RESERVE-CONST XXX")
       ALLOC-OPCODE-LOCAL :
-        println("C ALLOC-LOCAL XXX")
+        println("C ALLOC-LOCAL")
+        mov(a, MemPtr(heap-top(), 0, SIZEOF-LONG), CONST(tmp1(), value))
+        SET-LOCAL(x, ptr-to-ref(tmp2(), heap-top()))
+        add(a, LOCAL(tmp1(), y), 8 + 7)
+        and-op(a, tmp1(), CONST(tmp2(), (- 8L)))
+        lea(a, heap-top(), MemPtr(heap-top(), tmp1(), 0, 0, SIZEOF-BYTE))
       ALLOC-OPCODE-CONST :
-        println("C ALLOC-CONST XXX")
+        println("C ALLOC-CONST")
+        mov(a, MemPtr(heap-top(), 0, SIZEOF-LONG), CONST(tmp1(), value))
+        SET-LOCAL(x, ptr-to-ref(tmp2(), heap-top()))
+        lea(a, heap-top(), MemPtr(heap-top(), 8 + y, SIZEOF-BYTE))
       else :
         println("MISSING C OPCODE %_" % [opcode])
 
@@ -1393,7 +1460,14 @@ public defn encode (fid:Int, func:VMFunction,
         je(a, n1)
         jmp(a, n2)
       JUMP-TAGWORD-OPCODE :
-        println("F JUMP-TAGWORD XXX")
+        println("F JUMP-TAGWORD")
+        LOCAL(tmp1(), x) ; OBJ
+        and-op(a, LOCAL(tmp2(), x), CONST(rbx(), 7)) ; TAGBITS
+        LOCAL(rbx(), y) ; TAG
+        cmp(a, tmp2(), CONST(rax(), 1)) ; tagbits == 1
+        jne(a, n2)
+        mov(a, tmp1(), MemPtr(tmp1(), -1, SIZEOF-INT)) ; *p = *((int*)(obj - 1))
+        jump-op-reg(tmp1(), rbx(), je, cmp, n1, n2)    ; *p == tag
       JUMP-SET-OPCODE :
         println("F JUMP-SET")
         debug(a, "JUMP-SET %llx\n" LOCAL(tmp1(), x))
@@ -1878,6 +1952,7 @@ public defn encode (fid:Int, func:VMFunction,
           val y* = to-local(y(ins), 1)
           emit-ins-f(code, x*, y*, jump-offset(n1(ins)), jump-offset(n2(ins)))
         (ins:AllocIns) :
+          val continue-label = new-label(a)
           if all?({_ is NumConst}, sizes(ins)) :
             val num-obj = length(sizes(ins))
             val obj-sizes = for s in sizes(ins) map :
@@ -1886,9 +1961,9 @@ public defn encode (fid:Int, func:VMFunction,
             val sum-of-sizes = object-size(num-obj, sum(obj-sizes))
             if sum-of-sizes >= 1024 :
               val size-local = to-local(NumConst(sum-of-sizes),0)
-              emit-ins-c(RESERVE-OPCODE-LOCAL, 3, num-locals, size-local)
+              emit-ins-c(RESERVE-OPCODE-LOCAL, continue-label, num-locals, size-local)
             else :
-              emit-ins-c(RESERVE-OPCODE-CONST, 3, num-locals, sum-of-sizes)
+              emit-ins-c(RESERVE-OPCODE-CONST, continue-label, num-locals, sum-of-sizes)
             record-info(info(ins))
             emit-ins-a(POP-FRAME-OPCODE, num-locals)
             for (x in xs(ins), t in types(ins), sz in obj-sizes) do :
@@ -1898,15 +1973,17 @@ public defn encode (fid:Int, func:VMFunction,
                 emit-ins-c(ALLOC-OPCODE-LOCAL, slot(x), size-local, t)
               else :
                 emit-ins-c(ALLOC-OPCODE-CONST, slot(x), sz, t)
+            bind(a, continue-label)
           else:
             fatal("Multiple variable-sized allocations.") when length(sizes(ins)) > 1
             val x = xs(ins)[0]
             val type = types(ins)[0]
             val size = to-local(sizes(ins)[0], 0)
-            emit-ins-c(RESERVE-OPCODE-LOCAL, 3, num-locals, size)
+            emit-ins-c(RESERVE-OPCODE-LOCAL, continue-label, num-locals, size)
             record-info(info(ins))
             emit-ins-a(POP-FRAME-OPCODE, num-locals)
             emit-ins-c(ALLOC-OPCODE-LOCAL, slot(x), size, type)
+            bind(a, continue-label)
         (ins:DispatchIns) :
           ;Push arguments onto registers
           set-regs(ys(ins))
