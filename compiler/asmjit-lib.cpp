@@ -95,6 +95,9 @@ void assembler_and_reg(Assembler *a, const Gp *dst, const Gp *src) {
 void assembler_or_reg(Assembler *a, const Gp *dst, const Gp *src) {
   a->or_(*dst, *src);
 }
+void assembler_xor_reg(Assembler *a, const Gp *dst, const Gp *src) {
+  a->xor_(*dst, *src);
+}
 void assembler_not_reg(Assembler *a, const Gp *dst) {
   a->not_(*dst);
 }
@@ -104,17 +107,39 @@ void assembler_neg_reg(Assembler *a, const Gp *dst) {
 void assembler_add_reg(Assembler *a, const Gp *dst, const Gp *src) {
   a->add(*dst, *src);
 }
+void assembler_imul_reg(Assembler *a, const Gp *dst, const Gp *src) {
+  a->imul(*dst, *src);
+}
+void assembler_div_reg(Assembler *a, const Gp *dst, const Gp *src) {
+  a->div(*dst, *src);
+}
+void assembler_mod_reg(Assembler *a, const Gp *dst, const Gp *src) {
+  // TODO: FIX
+  a->div(*dst, *src);
+}
 void assembler_add_int(Assembler *a, const Gp *dst, int src) {
   a->add(*dst, src);
 }
 void assembler_sub_reg(Assembler *a, const Gp *dst, const Gp *src) {
   a->sub(*dst, *src);
 }
-void assembler_shl(Assembler *a, const Gp *dst, int src) {
+void assembler_shl_int(Assembler *a, const Gp *dst, int src) {
   a->shl(*dst, src);
 }
-void assembler_shr(Assembler *a, const Gp *dst, int src) {
+void assembler_shr_int(Assembler *a, const Gp *dst, int src) {
   a->shr(*dst, src);
+}
+void assembler_ashr_int(Assembler *a, const Gp *dst, int src) {
+  a->sar(*dst, src);
+}
+void assembler_shl_reg(Assembler *a, const Gp *dst, const Gp *src) {
+  a->shl(*dst, *src);
+}
+void assembler_shr_reg(Assembler *a, const Gp *dst, const Gp *src) {
+  a->shr(*dst, *src);
+}
+void assembler_ashr_reg(Assembler *a, const Gp *dst, const Gp *src) {
+  a->sar(*dst, *src);
 }
 void assembler_push(Assembler *a, Gp *reg) {
   a->push(*reg);
@@ -131,8 +156,21 @@ void assembler_call_reg(Assembler *a, Gp *reg) {
 void assembler_ret(Assembler *a) {
   a->ret();
 }
+void assembler_movsx(Assembler *a, const Gp *dst, const Gp *src) {
+  a->movsx(*dst, *src);
+}
+void assembler_movsxd(Assembler *a, const Gp *dst, const Gp *src) {
+  a->movsxd(*dst, *src);
+}
+
 void assembler_mov_reg(Assembler *a, const Gp *dst, const Gp *src) {
   a->mov(*dst, *src);
+}
+void assembler_mov_xmm_reg(Assembler *a, const Xmm *dst, const Gp *src) {
+  a->movd(*dst, *src);
+}
+void assembler_mov_reg_xmm(Assembler *a, const Gp *dst, const Xmm *src) {
+  a->movd(*dst, *src);
 }
 void assembler_mov_const(Assembler *a, const Gp *reg, uint64_t value) {
   a->mov(*reg, uint64_t(value));
@@ -187,6 +225,79 @@ void assembler_set_b(Assembler *a, const Gp *x) {
 }
 void assembler_set_be(Assembler *a, const Gp *x) {
   a->setbe(*x);
+}
+
+void assembler_movss(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->movss(*dst, *src);
+}
+void assembler_movsd(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->movsd(*dst, *src);
+}
+void assembler_cvtss2sd(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->cvtss2sd(*dst, *src);
+}
+void assembler_cvtsd2ss(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->cvtsd2ss(*dst, *src);
+}
+void assembler_cvtsi2ss(Assembler *a, const Xmm *dst, const Gp *src) {
+  a->cvtsi2ss(*dst, *src);
+}
+void assembler_cvtsi2sd(Assembler *a, const Xmm *dst, const Gp *src) {
+  a->cvtsi2sd(*dst, *src);
+}
+void assembler_cvtsd2si(Assembler *a, const Gp *dst, const Xmm *src) {
+  a->cvtsd2si(*dst, *src);
+}
+void assembler_cvtss2si(Assembler *a, const Gp *dst, const Xmm *src) {
+  a->cvtss2si(*dst, *src);
+}
+void assembler_addss(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->addss(*dst, *src);
+}
+void assembler_addsd(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->addsd(*dst, *src);
+}
+void assembler_subss(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->subss(*dst, *src);
+}
+void assembler_subsd(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->subsd(*dst, *src);
+}
+void assembler_mulss(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->mulss(*dst, *src);
+}
+void assembler_mulsd(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->mulsd(*dst, *src);
+}
+void assembler_divss(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->divss(*dst, *src);
+}
+void assembler_divsd(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->divsd(*dst, *src);
+}
+void assembler_minss(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->minss(*dst, *src);
+}
+void assembler_minsd(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->minsd(*dst, *src);
+}
+void assembler_maxss(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->maxss(*dst, *src);
+}
+void assembler_maxsd(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->maxsd(*dst, *src);
+}
+void assembler_sqrtss(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->sqrtss(*dst, *src);
+}
+void assembler_sqrtsd(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->sqrtsd(*dst, *src);
+}
+void assembler_ucomiss(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->ucomiss(*dst, *src);
+}
+void assembler_ucomisd(Assembler *a, const Xmm *dst, const Xmm *src) {
+  a->ucomisd(*dst, *src);
 }
 
 uint64_t func_call(Func f) {
@@ -263,6 +374,12 @@ const Gp* x86_r14(void) {
 }
 const Gp* x86_r15(void) {
   return &r15;
+}
+const Xmm* x86_xmm0(void) {
+  return &xmm0;
+}
+const Xmm* x86_xmm1(void) {
+  return &xmm1;
 }
 const MemPtr* x86_ptr_gp_base_const_offset_size(Gp *base_ptr, int32_t offset, int32_t size) {
   auto base = *base_ptr;

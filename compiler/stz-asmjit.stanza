@@ -19,7 +19,11 @@ extern assembler_call_reg: (ptr<?>, ptr<?>) -> int
 extern assembler_ret: (ptr<?>) -> int
 extern assembler_mov_const: (ptr<?>, ptr<?>, long) -> int
 extern assembler_mov_label: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_movsx: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_movsxd: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_mov_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_mov_xmm_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_mov_reg_xmm: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_mov_gp_ptr: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_mov_ptr_gp: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_lea_ptr: (ptr<?>, ptr<?>, ptr<?>) -> int
@@ -41,13 +45,47 @@ extern assembler_jbe: (ptr<?>, ptr<?>) -> int
 extern assembler_add_int: (ptr<?>, ptr<?>, long) -> int
 extern assembler_add_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_sub_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_imul_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_div_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_mod_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_and_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_or_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_xor_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_not_reg: (ptr<?>, ptr<?>) -> int
 extern assembler_neg_reg: (ptr<?>, ptr<?>) -> int
-extern assembler_shl: (ptr<?>, ptr<?>, int) -> int
-extern assembler_shr: (ptr<?>, ptr<?>, int) -> int
+extern assembler_shl_int: (ptr<?>, ptr<?>, int) -> int
+extern assembler_shr_int: (ptr<?>, ptr<?>, int) -> int
+extern assembler_ashr_int: (ptr<?>, ptr<?>, int) -> int
+extern assembler_shl_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_shr_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_ashr_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+
+extern assembler_movss: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_movsd: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_cvtss2sd: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_cvtsd2ss: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_cvtsi2ss: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_cvtsi2sd: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_cvtss2si: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_cvtsd2si: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_addss: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_addsd: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_subss: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_subsd: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_mulss: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_mulsd: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_divss: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_divsd: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_minss: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_minsd: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_maxss: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_maxsd: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_sqrtss: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_sqrtsd: (ptr<?>, ptr<?>, ptr<?>) -> int
+
 extern assembler_cmp: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_ucomiss: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_ucomisd: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_set_e: (ptr<?>, ptr<?>) -> int
 extern assembler_set_ne: (ptr<?>, ptr<?>) -> int
 extern assembler_set_s: (ptr<?>, ptr<?>) -> int
@@ -89,6 +127,8 @@ extern x86_r12: () -> ptr<?>
 extern x86_r13: () -> ptr<?>
 extern x86_r14: () -> ptr<?>
 extern x86_r15: () -> ptr<?>
+extern x86_xmm0: () -> ptr<?>
+extern x86_xmm1: () -> ptr<?>
 
 public lostanza deftype JitRuntime :
   value: ptr<?>
@@ -99,6 +139,8 @@ public lostanza deftype Assembler :
 public lostanza deftype Label :
   value: ptr<?>
 public lostanza deftype Gp :
+  value: ptr<?>
+public lostanza deftype Xmm :
   value: ptr<?>
 public lostanza deftype Func :
   value: ptr<?>
@@ -172,6 +214,10 @@ public lostanza defn r14 () -> ref<Gp> :
   return new Gp{ call-c x86_r14() }
 public lostanza defn r15 () -> ref<Gp> :
   return new Gp{ call-c x86_r15() }
+public lostanza defn xmm0 () -> ref<Xmm> :
+  return new Xmm{ call-c x86_xmm0() }
+public lostanza defn xmm1 () -> ref<Xmm> :
+  return new Xmm{ call-c x86_xmm1() }
 public lostanza defn jit-runtime-new () -> ref<JitRuntime> :
   return new JitRuntime{ call-c jit_runtime_new() }
 public lostanza defn delete (rt:ref<JitRuntime>) -> ref<False> :
@@ -220,11 +266,23 @@ public lostanza defn add (a:ref<Assembler>, reg:ref<Gp>, value:ref<Int>) -> ref<
 public lostanza defn add (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
   call-c assembler_add_reg(a.value, dst.value, src.value)
   return false
+public lostanza defn imul (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_imul_reg(a.value, dst.value, src.value)
+  return false
+public lostanza defn div (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_div_reg(a.value, dst.value, src.value)
+  return false
+public lostanza defn mod (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_mod_reg(a.value, dst.value, src.value)
+  return false
 public lostanza defn and-op (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
   call-c assembler_and_reg(a.value, dst.value, src.value)
   return false
 public lostanza defn or-op (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
   call-c assembler_or_reg(a.value, dst.value, src.value)
+  return false
+public lostanza defn xor-op (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_xor_reg(a.value, dst.value, src.value)
   return false
 public lostanza defn not-op (a:ref<Assembler>, dst:ref<Gp>) -> ref<False> :
   call-c assembler_not_reg(a.value, dst.value)
@@ -236,10 +294,22 @@ public lostanza defn sub (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<Fal
   call-c assembler_sub_reg(a.value, dst.value, src.value)
   return false
 public lostanza defn shl (a:ref<Assembler>, reg:ref<Gp>, value:ref<Int>) -> ref<False> :
-  call-c assembler_shl(a.value, reg.value, value.value)
+  call-c assembler_shl_int(a.value, reg.value, value.value)
   return false
 public lostanza defn shr (a:ref<Assembler>, reg:ref<Gp>, value:ref<Int>) -> ref<False> :
-  call-c assembler_shr(a.value, reg.value, value.value)
+  call-c assembler_shr_int(a.value, reg.value, value.value)
+  return false
+public lostanza defn ashr (a:ref<Assembler>, reg:ref<Gp>, value:ref<Int>) -> ref<False> :
+  call-c assembler_ashr_int(a.value, reg.value, value.value)
+  return false
+public lostanza defn shl (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_shl_reg(a.value, dst.value, src.value)
+  return false
+public lostanza defn shr (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_shr_reg(a.value, dst.value, src.value)
+  return false
+public lostanza defn ashr (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_ashr_reg(a.value, dst.value, src.value)
   return false
 public lostanza defn mov (a:ref<Assembler>, reg:ref<Gp>, value:ref<Long>) -> ref<False> :
   call-c assembler_mov_const(a.value, reg.value, value.value)
@@ -247,8 +317,20 @@ public lostanza defn mov (a:ref<Assembler>, reg:ref<Gp>, value:ref<Long>) -> ref
 public lostanza defn mov (a:ref<Assembler>, reg:ref<Gp>, value:ref<Label>) -> ref<False> :
   call-c assembler_mov_label(a.value, reg.value, value.value)
   return false
+public lostanza defn movsx (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_movsx(a.value, dst.value, src.value)
+  return false
+public lostanza defn movsxd (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_movsxd(a.value, dst.value, src.value)
+  return false
 public lostanza defn mov (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
   call-c assembler_mov_reg(a.value, dst.value, src.value)
+  return false
+public lostanza defn mov (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_mov_xmm_reg(a.value, dst.value, src.value)
+  return false
+public lostanza defn mov (a:ref<Assembler>, dst:ref<Gp>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_mov_reg_xmm(a.value, dst.value, src.value)
   return false
 public lostanza defn mov (a:ref<Assembler>, reg:ref<Gp>, ptr:ref<MemPtr>) -> ref<False> :
   call-c assembler_mov_gp_ptr(a.value, reg.value, ptr.value)
@@ -347,3 +429,72 @@ public lostanza defn jbe (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
   call-c assembler_jbe(a.value, lab.value)
   return false
 
+public lostanza defn movss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_movss(a.value, dst.value, src.value)
+  return false
+public lostanza defn movsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_movsd(a.value, dst.value, src.value)
+  return false
+public lostanza defn cvtsd2ss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_cvtsd2ss(a.value, dst.value, src.value)
+  return false
+public lostanza defn cvtsi2ss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_cvtsi2ss(a.value, dst.value, src.value)
+  return false
+public lostanza defn cvtsi2sd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_cvtsi2sd(a.value, dst.value, src.value)
+  return false
+public lostanza defn cvtss2si (a:ref<Assembler>, dst:ref<Gp>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_cvtss2si(a.value, dst.value, src.value)
+  return false
+public lostanza defn cvtsd2si (a:ref<Assembler>, dst:ref<Gp>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_cvtsd2si(a.value, dst.value, src.value)
+  return false
+public lostanza defn addss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_addss(a.value, dst.value, src.value)
+  return false
+public lostanza defn addsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_addsd(a.value, dst.value, src.value)
+  return false
+public lostanza defn subss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_subss(a.value, dst.value, src.value)
+  return false
+public lostanza defn subsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_subsd(a.value, dst.value, src.value)
+  return false
+public lostanza defn mulss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_mulss(a.value, dst.value, src.value)
+  return false
+public lostanza defn mulsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_mulsd(a.value, dst.value, src.value)
+  return false
+public lostanza defn divss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_divss(a.value, dst.value, src.value)
+  return false
+public lostanza defn divsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_divsd(a.value, dst.value, src.value)
+  return false
+public lostanza defn minss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_minss(a.value, dst.value, src.value)
+  return false
+public lostanza defn minsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_minsd(a.value, dst.value, src.value)
+  return false
+public lostanza defn maxss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_maxss(a.value, dst.value, src.value)
+  return false
+public lostanza defn maxsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_maxsd(a.value, dst.value, src.value)
+  return false
+public lostanza defn sqrtss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_sqrtss(a.value, dst.value, src.value)
+  return false
+public lostanza defn sqrtsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_sqrtsd(a.value, dst.value, src.value)
+  return false
+public lostanza defn ucomiss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_ucomiss(a.value, dst.value, src.value)
+  return false
+public lostanza defn ucomisd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_ucomisd(a.value, dst.value, src.value)
+  return false
