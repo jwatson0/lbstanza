@@ -455,7 +455,7 @@ public lostanza defn run-bytecode (vm:ref<VirtualMachine>, start-func:ref<Int>) 
   val vms = new Long{vm.vmstate as long}
   call-c printf("RUN VMS = %lld\n" vm.vmstate)
   val func = make-jit-launch(jit-runtime(vm), vms, start-func)
-  val res = call(func)
+  val res = call(func, call-prim crsp())
   null-stack-pointer(vm)
   VIRTUAL-MACHINE = false
   return res

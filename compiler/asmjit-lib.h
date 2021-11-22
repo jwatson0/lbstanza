@@ -109,6 +109,8 @@ extern "C" {
 
   typedef uint64_t (*Func)(void);
   uint64_t func_call(Func f);
+  typedef uint64_t (*Func1)(uint64_t);
+  uint64_t func_call1(Func1 f, uint64_t arg);
   const MemPtr* x86_ptr_gp_base_const_offset_size(Gp *base, int32_t offset, int32_t size);
   const MemPtr* x86_ptr_gp_base_index_const_shift_offset_size
     (Gp *base, Gp* index, int32_t shift, int32_t offset, int32_t size);

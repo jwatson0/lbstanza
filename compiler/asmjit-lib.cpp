@@ -303,6 +303,9 @@ void assembler_ucomisd(Assembler *a, const Xmm *dst, const Xmm *src) {
 uint64_t func_call(Func f) {
   return f();
 }
+uint64_t func_call1(Func1 f, uint64_t arg) {
+  return f(arg);
+}
 const Gp* x86_al(void) {
   return &al;
 }

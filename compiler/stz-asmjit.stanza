@@ -103,6 +103,7 @@ extern x86_ptr_gp_base_index_const_shift_offset_size: (ptr<?>, ptr<?>, long, lon
 extern x86_ptr_label_base_index_const_shift_offset_size: (ptr<?>, ptr<?>, long, long, long) -> ptr<?>
 extern x86_ptr_label_base_const_index_size: (ptr<?>, long, long) -> ptr<?>
 extern func_call: (ptr<?>) -> int
+extern func_call1: (ptr<?>,long) -> int
 
 extern assembler_embed_label: (ptr<?>, ptr<?>) -> int
 
@@ -343,6 +344,8 @@ public lostanza defn mov (a:ref<Assembler>, ptr:ref<MemPtr>, reg:ref<Gp>) -> ref
   return false
 public lostanza defn call (func:ref<Func>) -> ref<Long> :
   return new Long{ call-c func_call(func.value) }
+public lostanza defn call (func:ref<Func>, arg:ptr<?>) -> ref<Long> :
+  return new Long{ call-c func_call1(func.value, arg as long) }
 public lostanza defn lea (a:ref<Assembler>, reg:ref<Gp>, ptr:ref<MemPtr>) -> ref<False> :
   call-c assembler_lea_ptr(a.value, reg.value, ptr.value)
   return false

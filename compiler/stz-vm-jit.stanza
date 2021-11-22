@@ -254,6 +254,11 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
   ; mov(a, rax(), 0L)
   ; mov(a, rax(), MemPtr(rax(), 0, 0))
   ; Setup JIT registers
+  mov(a, tmp1(), c-params()[0])
+  push(a, tmp1()) ;PUSHING RSP
+  debug(a, "JIT CRSP TMP1 %llx\n" tmp1())
+  mov(a, tmp1(), MemPtr(rsp(), 0, SIZEOF-LONG))
+  debug(a, "JIT CRSP SP[0] %llx\n" tmp1())
   mov(a, vmstate(), vms)
   debug(a, "JIT VMSTATE %llx\n" vmstate())
   vmstate-reg(a, registers(), VMSTATE-REGISTERS-OFFSET)
@@ -276,6 +281,7 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
   jmp(a, rax())
   bind(a, ret-label)
   debug(a, "RET-LABEL\n")
+  pop(a, tmp1()) ;POPPING CRSP
   ret(a)
   add(rt, code)
   ; TODO: CLEANUP
@@ -407,6 +413,9 @@ public defn encode (fid:Int, func:VMFunction,
 
   defn stack-frame-slots (dst:Gp) -> Gp :
     lea(a, dst, MemPtr(stack-pointer(), STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG))
+    dst
+  defn GET-CRSP (dst:Gp) -> Gp :
+    mov(a, dst, MemPtr(rsp(), 0, SIZEOF-LONG))
     dst
   defn GET-REG (dst:Gp, r:Int) :
     mov(a, dst, MemPtr(registers(), r * SIZEOF-LONG, SIZEOF-LONG))
@@ -614,9 +623,9 @@ public defn encode (fid:Int, func:VMFunction,
         SAVE-STATE()
         SET-LOCAL(value as Int, vmstate())
       C-RSP-OPCODE :
-        println("A C-RSP XXX")
-        ; SAVE-STATE()
-        ; SET-LOCAL(value, stanza_crsp)
+        println("A C-RSP")
+        SAVE-STATE()
+        SET-LOCAL(value, GET-CRSP(tmp1()))
       else :
         println("MISSING A OPCODE %_" % [opcode])
 
