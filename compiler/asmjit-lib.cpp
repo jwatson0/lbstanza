@@ -400,6 +400,11 @@ const MemPtr* x86_ptr_label_base_const_index_size (Label *base_ptr, int32_t inde
   auto base = *base_ptr;
   return new MemPtr(ptr(base, index, size));
 }
+
+void assembler_embed_label(Assembler *a, Label *label) {
+  a->embedLabel(*label);
+}
+
 void dump_registers (void) {
   uint64_t rax;
   asm("\t movq %%rax,%0" : "=r"(rax));  

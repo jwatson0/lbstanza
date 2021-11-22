@@ -103,6 +103,9 @@ extern x86_ptr_gp_base_index_const_shift_offset_size: (ptr<?>, ptr<?>, long, lon
 extern x86_ptr_label_base_index_const_shift_offset_size: (ptr<?>, ptr<?>, long, long, long) -> ptr<?>
 extern x86_ptr_label_base_const_index_size: (ptr<?>, long, long) -> ptr<?>
 extern func_call: (ptr<?>) -> int
+
+extern assembler_embed_label: (ptr<?>, ptr<?>) -> int
+
 extern x86_al: () -> ptr<?>
 extern x86_bl: () -> ptr<?>
 extern x86_cl: () -> ptr<?>
@@ -497,4 +500,8 @@ public lostanza defn ucomiss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> r
   return false
 public lostanza defn ucomisd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
   call-c assembler_ucomisd(a.value, dst.value, src.value)
+  return false
+
+public lostanza defn embed (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
+  call-c assembler_embed_label(a.value, lab.value)
   return false

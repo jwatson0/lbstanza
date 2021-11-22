@@ -1135,9 +1135,12 @@ public defn load (vm:VirtualMachine, vmps:Collection<VMPackage>, keep-existing-g
       load-package-methods(branch-table(vm), name(p), methods(p))
     ;Load functions
     val encoding-resolver = EncodingResolver(vm-ids, branch-table(vm), live-map-table(linker(vm)))
+    val extend-stack-return = make-extend-stack-return(jit-runtime(vm))
+    val extend-stack-launch = make-extend-stack-launch(jit-runtime(vm), extend-stack-return)
     for f in funcs(load-unit) do :
       println("ENCODING %_" % [id(f)])
-      val ef = encode(id(f), func(f), jit-runtime(vm), encoding-resolver, backend(vm))
+      val ef = encode(id(f), func(f), jit-runtime(vm), encoding-resolver,
+                      extend-stack-launch, extend-stack-return, backend(vm))
       load-function(vmt, id(f), ef)
     ;Load all classes into table  
     load-classes(vmt, classes(load-unit))

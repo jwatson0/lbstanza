@@ -41,6 +41,7 @@ extern "C" {
   void assembler_jmp_mem(Assembler *a, MemPtr *mem);
   void assembler_jmp_reg(Assembler *a, Gp *reg);
   void assembler_ret(Assembler *a);
+  void assembler_embed_label(Assembler *a, Label *label);
   void assembler_movsx(Assembler *a, const Gp *dst, const Gp *src);
   void assembler_movsxd(Assembler *a, const Gp *dst, const Gp *src);
   void assembler_mov_xmm_reg(Assembler *a, const Xmm *dst, const Gp *src);

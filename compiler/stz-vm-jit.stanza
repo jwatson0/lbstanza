@@ -130,7 +130,7 @@ val stack-frame-offsets = Counter(0)
 val STACK-FRAME-RETURN-OFFSET = next(stack-frame-offsets, SIZEOF-LONG)
 val STACK-FRAME-LIVENESS-MAP-OFFSET = next(stack-frame-offsets, SIZEOF-LONG)
 val STACK-FRAME-SLOTS-OFFSET = next(stack-frame-offsets, SIZEOF-LONG)
-val SIZEOF-STACKFRAME = value(stack-frame-offsets)
+val SIZEOF-STACK-FRAME = value(stack-frame-offsets)
 
 val stack-offsets = Counter(0)
 val STACK-SIZE-OFFSET = next(stack-offsets, SIZEOF-LONG)
@@ -164,6 +164,20 @@ defn untag-stack (a:Assembler, dst:Gp, stk:Gp) -> Gp :
   dst
 defn untag-stack (a:Assembler, stk:Gp) -> Gp :
   untag-stack(a, tmp1(), stk)
+
+val INT-TAG-BITS = 0
+val REF-TAG-BITS = 1
+val MARKER-TAG-BITS = 2
+val BYTE-TAG-BITS = 3
+val CHAR-TAG-BITS = 4
+val FLOAT-TAG-BITS = 5
+
+val SYSTEM-RETURN-STUB = -2
+
+defn do-BOOLREF (a:Assembler, x:Gp) -> Gp :
+  shl(a, x, 3)
+  add(a, x, MARKER-TAG-BITS)
+  x
 
 extern malloc: (long) -> ptr<?>
 extern strcpy: (ptr<byte>, ptr<byte>) -> ptr<?>
@@ -266,6 +280,60 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
   add(rt, code)
   ; TODO: CLEANUP
 
+defn CONST (a:Assembler, x:Gp, id:Int|Long) -> Gp : (mov(a, x, to-long(id)), x)
+defn SET-REG (a:Assembler, r:Int, v:Gp) :
+  mov(a, MemPtr(registers(), r * SIZEOF-LONG, SIZEOF-LONG), v)
+
+public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func) -> Func :
+  val size-required = rax()
+  val code = code-holder-new(rt)
+  val a = assembler-new(code)
+  val end-label = new-label(a)
+  ;Save current stack
+  mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), stack-pointer())
+  lea(a, tmp1(), MemPtr(end-label, 0, SIZEOF-LONG))
+  ;Swap stack and registers
+  mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), tmp1())
+  mov(a, MemPtr(vmstate(), VMSTATE-CURRENT-STACK-OFFSET, SIZEOF-LONG), vmstate-reg(a, VMSTATE-SYSTEM-STACK-OFFSET))
+  mov(a, MemPtr(vmstate(), VMSTATE-SYSTEM-STACK-OFFSET, SIZEOF-LONG), current-stack())
+  mov(a, MemPtr(vmstate(), VMSTATE-REGISTERS-OFFSET, SIZEOF-LONG), vmstate-reg(a, VMSTATE-SYSTEM-REGISTERS-OFFSET))
+  mov(a, MemPtr(vmstate(), VMSTATE-SYSTEM-REGISTERS-OFFSET, SIZEOF-LONG), registers())
+  ;Restore stack state
+  mov(a, current-stack(), vmstate-reg(a, VMSTATE-SYSTEM-STACK-OFFSET))
+  untag-stack(a, stk(), current-stack())
+  mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG))
+  mov(a, registers(), MemPtr(vmstate(), VMSTATE-REGISTERS-OFFSET, SIZEOF-LONG))
+  ;Set arguments
+  SET-REG(a, 0, do-BOOLREF(a, CONST(a, tmp1(), 0)))
+  SET-REG(a, 1, CONST(a, tmp1(), 1))
+  SET-REG(a, 1, size-required)
+  mov(a, stack-pointer(), MemPtr(stk(), STACK-FRAMES-OFFSET, SIZEOF-LONG))
+  mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), CONST(a, tmp1(), value(stack-overflow-return)))
+  mov(a, tmp2(), MemPtr(functions(), SIZEOF-LONG * EXTEND-STACK-FN, SIZEOF-LONG))
+  jmp(a, tmp2())
+  bind(a, end-label)
+  add(rt, code)
+
+public defn make-extend-stack-return (rt:JitRuntime) -> Func :
+  val code = code-holder-new(rt)
+  val a = assembler-new(code)
+  ;System stack no longer needed
+  mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), CONST(a, tmp1(), 0))
+  ;Swap stack and registers
+  mov(a, MemPtr(vmstate(), VMSTATE-CURRENT-STACK-OFFSET, SIZEOF-LONG), vmstate-reg(a, VMSTATE-SYSTEM-STACK-OFFSET))
+  mov(a, MemPtr(vmstate(), VMSTATE-SYSTEM-STACK-OFFSET, SIZEOF-LONG), current-stack())
+  mov(a, MemPtr(vmstate(), VMSTATE-REGISTERS-OFFSET, SIZEOF-LONG), vmstate-reg(a, VMSTATE-SYSTEM-REGISTERS-OFFSET))
+  mov(a, MemPtr(vmstate(), VMSTATE-SYSTEM-REGISTERS-OFFSET, SIZEOF-LONG), registers())
+  ;Restore stack state
+  mov(a, current-stack(), MemPtr(vmstate(), VMSTATE-CURRENT-STACK-OFFSET, SIZEOF-LONG))
+  untag-stack(a, stk(), current-stack())
+  mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG))
+  mov(a, registers(), MemPtr(vmstate(), VMSTATE-REGISTERS-OFFSET, SIZEOF-LONG))
+  ;Continue where we were
+  mov(a, tmp1(), MemPtr(stk(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
+  jmp(a, tmp1())
+  add(rt, code)
+
 defn compute-stack-limit (a:Assembler) -> Gp :
   mov(a, rax(), MemPtr(stk(), STACK-FRAMES-OFFSET, SIZEOF-LONG))
   mov(a, tmp1(), MemPtr(stk(), STACK-SIZE-OFFSET, SIZEOF-LONG))
@@ -275,12 +343,16 @@ defn compute-stack-limit (a:Assembler) -> Gp :
 public defn encode (fid:Int, func:VMFunction,
                     rt:JitRuntime,
                     resolver:EncodingResolver,
+                    extend-stack-launch:Func,
+                    extend-stack-return:Func,
                     backend:Backend) -> EncodedFunction :
+  val extend-stack-launch-value = value(extend-stack-launch)
   val code = code-holder-new(rt)
   val a = assembler-new(code)
     
   defn CONST (x:Gp, id:Int|Long) -> Gp : (mov(a, x, to-long(id)), x)
   defn CONST (id:Int|Long) -> Gp : CONST(tmp1(), id)
+  defn BOOLREF (x:Gp) -> Gp : do-BOOLREF(a, x)
 
   debug(a, "--- ENTERING FUNC %d\n" CONST(fid))
   debug(a, "REGISTERS:\n")
@@ -388,7 +460,7 @@ public defn encode (fid:Int, func:VMFunction,
     LOCAL-DOUBLE(xmm0(), l)
 
   defn PUSH-FRAME (num-locals:Int, ret-addr:Label) :
-    add(a, stack-pointer(), SIZEOF-STACKFRAME + num-locals * SIZEOF-LONG)
+    add(a, stack-pointer(), SIZEOF-STACK-FRAME + num-locals * SIZEOF-LONG)
     lea(a, tmp1(), MemPtr(ret-addr, 0, SIZEOF-LONG))
     debug(a, "PUSH-FRAME RET %llx\n" tmp1())
     mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), tmp1())
@@ -397,7 +469,7 @@ public defn encode (fid:Int, func:VMFunction,
     false
 
   defn POP-FRAME (num-locals:Int) :
-    add(a, stack-pointer(), -1 * (SIZEOF-STACKFRAME + num-locals * SIZEOF-LONG))
+    add(a, stack-pointer(), -1 * (SIZEOF-STACK-FRAME + num-locals * SIZEOF-LONG))
     ; stack_pointer = (StackFrame*)((char*)stack_pointer - sizeof(StackFrame) - (num_locals) * SIZEOF-LONG)
     false
 
@@ -427,36 +499,6 @@ public defn encode (fid:Int, func:VMFunction,
     ; stack_limit = (char*)(stk->frames) + stk->size
     false
 
-  val INT-TAG-BITS = 0
-  val REF-TAG-BITS = 1
-  val MARKER-TAG-BITS = 2
-  val BYTE-TAG-BITS = 3
-  val CHAR-TAG-BITS = 4
-  val FLOAT-TAG-BITS = 5
-
-  val FALSE-TYPE = 0
-  val TRUE-TYPE = 1
-  val BYTE-TYPE = 2
-  val CHAR-TYPE = 3
-  val INT-TYPE = 4
-  val FLOAT-TYPE = 5
-  val STACK-TYPE = 6
-  val FN-TYPE = 7
-  val TYPE-TYPE = 8
-  val LIVENESS-TRACKER-TYPE = 9
-
-  val EXTEND-HEAP-FN = 0
-  val EXTEND-STACK-FN = 1
-  val INIT-CONSTS-FN = 2
-  val EXECUTE-TOPLEVEL-COMMAND-FN = 3
-
-  val SYSTEM-RETURN-STUB = -2
-
-  defn BOOLREF (x:Gp) -> Gp :
-    shl(a, x, 3)
-    add(a, x, MARKER-TAG-BITS)
-    x
-
   defn c-call (fptr:Long) :
     push(a, r10())
     push(a, r11())
@@ -477,18 +519,32 @@ public defn encode (fid:Int, func:VMFunction,
     do-tcall(f)
     bind(a, end-label)
 
-  defn emit-ins-a (opcode:Int, value:Int|Label) :
+  defn emit-ins-a (opcode:Int, value:Label) :
+    switch(opcode) :
+      GOTO-OPCODE : 
+        println("A GOTO")
+        debug(a, "GOTO\n")
+        jmp(a, value as Label)
+
+  defn emit-ins-a (opcode:Int, value:Int) :
     switch(opcode) :
       FNENTRY-OPCODE :
-        ; TODO: STACK OVERFLOW CHECK
-        println("A FNENTRY XXX")
+        println("A FNENTRY")
+        val frame-size = value * SIZEOF-LONG + SIZEOF-STACK-FRAME
+        val size-required = frame-size + SIZEOF-STACK-FRAME
+        ;Size-required must be in rax to line up for extend-stack-launch
+        add(a, CONST(rax(), size-required), stack-pointer())
+        cmp(a, rax(), stack-limit())
+        val all-good-label = new-label(a)
+        jle(a, all-good-label)
+        jmp(a, CONST(tmp1(), extend-stack-launch-value))
+        bind(a, all-good-label)
         false
       DISPATCH-OPCODE :
-        println("A DISPATCH XXX")
+        println("A DISPATCH")
         val tgts = new-label(a)
         read-dispatch-table(a, vmstate(), CONST(tmp1(), value as Int))
-        mov(a, tmp2(), MemPtr(tgts, rax(), 2, 0, SIZEOF-INT))
-        mov(a, tmp2(), MemPtr(functions(), tmp2(), 3, 0, SIZEOF-LONG))
+        mov(a, tmp2(), MemPtr(tgts, rax(), 3, 0, SIZEOF-LONG))
         jmp(a, tmp2())
         bind(a, tgts)
       TCALL-CLOSURE-OPCODE :
@@ -541,19 +597,14 @@ public defn encode (fid:Int, func:VMFunction,
         mov(a, tmp2(), to-long(value as Int))
         mov(a, MemPtr(stack-pointer(), STACK-FRAME-LIVENESS-MAP-OFFSET, SIZEOF-LONG), tmp2())
         ; stack_pointer->liveness_map = value;
-      GOTO-OPCODE : 
-        println("A GOTO")
-        debug(a, "GOTO\n")
-        jmp(a, value as Label)
       DISPATCH-METHOD-OPCODE :
         println("A DISPATCH-METHOD")
         val code-label = new-label(a)
         val tgts = new-label(a)
         read-dispatch-table(a, vmstate(), CONST(tmp1(), value as Int))
-        cmp(a, rax(), CONST(tmp1(), 2))
+        cmp(a, rax(), CONST(tmp1(), 2)) ; < 2 are targets and >= 2 are methods to goto
         jge(a, code-label)
-        mov(a, tmp2(), MemPtr(tgts, rax(), 2, 0, SIZEOF-INT))
-        mov(a, tmp2(), MemPtr(functions(), tmp2(), 3, 0, SIZEOF-LONG))
+        mov(a, tmp2(), MemPtr(tgts, rax(), 3, 0, SIZEOF-LONG))
         jmp(a, tmp2())
         bind(a, code-label)
         mov(a, tmp2(), MemPtr(functions(), tmp2(), 3, -2, SIZEOF-LONG))
@@ -863,11 +914,28 @@ public defn encode (fid:Int, func:VMFunction,
         println("MISSING C OPCODE %_" % [opcode])
 
   defn emit-ins-c (opcode:Int, x:Label, y:Int, value:Int) :
+    defn do-reserve (size:Gp) :
+      mov(a, tmp2(), heap-top())
+      add(a, tmp2(), size)
+      cmp(a, tmp2(), heap-limit())
+      jle(a, x)
+      SET-REG(0, BOOLREF(CONST(tmp1(), 0)))
+      SET-REG(1, CONST(tmp1(), 1L))
+      SET-REG(2, size)
+      mov(a, tmp2(), MemPtr(functions(), SIZEOF-LONG * EXTEND-HEAP-FN, SIZEOF-LONG))
+      val end-label = new-label(a)
+      PUSH-FRAME(y, end-label)
+      jmp(a, tmp2())
+      bind(a, end-label)
     switch(opcode) :
       RESERVE-OPCODE-LOCAL :
-        println("C RESERVE-LOCAL XXX")
+        println("C RESERVE-LOCAL")
+        add(a, LOCAL(rbx(), y), 8 + 7)
+        and-op(a, rbx(), CONST(tmp2(), (- 8L)))
+        do-reserve(rbx())
       RESERVE-OPCODE-CONST :
-        println("C RESERVE-CONST XXX")
+        println("C RESERVE-CONST")
+        do-reserve(CONST(rbx(), value))
 
   defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Label) :
     switch(opcode) :
@@ -1640,10 +1708,8 @@ public defn encode (fid:Int, func:VMFunction,
         println("MISSING F OPCODE %_" % [opcode])
 
   defn emit-ins-targets (dests:Tuple<Label>) :
-    ; TODO:
-    ; put(buffer, length(dests))
-    ; for d in dests do : put(buffer, d)
-    false
+    for d in dests do :
+      embed(a, d)
 
   ;Encode multivarity functions
   defn encode (multi:VMMultifn) :
