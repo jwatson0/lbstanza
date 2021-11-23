@@ -110,12 +110,12 @@ void assembler_add_reg(Assembler *a, const Gp *dst, const Gp *src) {
 void assembler_imul_reg(Assembler *a, const Gp *dst, const Gp *src) {
   a->imul(*dst, *src);
 }
-void assembler_div_reg(Assembler *a, const Gp *dst, const Gp *src) {
-  a->div(*dst, *src);
+void assembler_div_reg(Assembler *a, const Gp *divisor) {
+  a->idiv(*divisor);
 }
-void assembler_mod_reg(Assembler *a, const Gp *dst, const Gp *src) {
+void assembler_mod_reg(Assembler *a, const Gp *divisor) {
   // TODO: FIX
-  a->div(*dst, *src);
+  a->idiv(*divisor);
 }
 void assembler_add_int(Assembler *a, const Gp *dst, int src) {
   a->add(*dst, src);

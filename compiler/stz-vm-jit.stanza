@@ -640,7 +640,7 @@ public defn encode (fid:Int, func:VMFunction,
         mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
         jmp(a, tmp1())
         bind(a, continue-label)
-      RETURN-OPCODE : ;YYY
+      RETURN-OPCODE : 
         println("A RETURN")
         mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
         debug(a, "RETURNING TO %llx\n", tmp1())
@@ -817,7 +817,7 @@ public defn encode (fid:Int, func:VMFunction,
         debug(a, "TAG-FLOAT\n")
         TAG(tmp2(), LOCAL(tmp1(), value), CHAR-TAG-BITS)
         SET-LOCAL(x, tmp2())
-      TAG-OPCODE-INT : ;YYY
+      TAG-OPCODE-INT :
         println("B TAG-INT")
         debug(a, "TAG-INT\n")
         TAG(tmp2(), LOCAL(tmp1(), value), INT-TAG-BITS)
@@ -869,7 +869,7 @@ public defn encode (fid:Int, func:VMFunction,
         println("C CALL-LOCAL %_" % [value])
         debug(a, "CALL-LOCAL\n")
         do-call(LOCAL(rbx(), value), x)
-      CALL-OPCODE-CODE : ;YYY
+      CALL-OPCODE-CODE :
         println("C CALL-CODE %_" % [value])
         debug(a, "CALL-CODE\n")
         do-call(CONST(rbx(), value), x)
@@ -979,8 +979,10 @@ public defn encode (fid:Int, func:VMFunction,
 
   defn emit-ins-c (opcode:Int, x:Label, y:Int, value:Int) :
     defn do-reserve (size:Gp) :
+      debug(a, "RESERVE SIZE %llx LIMIT %llx\n", size, heap-limit())
       mov(a, tmp2(), heap-top())
       add(a, tmp2(), size)
+      debug(a, "  CMP DESIRED %llx LIMIT %llx\n", tmp2(), heap-limit())
       cmp(a, tmp2(), heap-limit())
       jle(a, x)
       SET-REG(0, BOOLREF(CONST(tmp1(), 0)))
@@ -991,6 +993,7 @@ public defn encode (fid:Int, func:VMFunction,
       PUSH-FRAME(y, end-label)
       jmp(a, tmp2())
       bind(a, end-label)
+      debug(a, "RESERVED\n")
     switch(opcode) :
       RESERVE-OPCODE-LOCAL : ;YYY
         println("C RESERVE-LOCAL")
@@ -1030,17 +1033,20 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, tmp1())
       INT-DIV-OPCODE : ;YYY
         println("C INT-DIV")
-        div(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
-        shl(a, tmp1(), 32)
-        debug(a, "INT-DIV %llx\n" tmp1())
-        SET-LOCAL(x, tmp1())
+        xor-op(a, rdx(), rdx())
+        LOCAL(rax(), y), 
+        div(a, LOCAL(tmp2(), value))
+        shl(a, rax(), 32)
+        debug(a, "INT-DIV %llx\n" rax())
+        SET-LOCAL(x, rax())
       INT-MOD-OPCODE : ;YYY
         println("C INT-MOD")
-        ;TODO: WHAT'S MOD?
-        div(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
-        shl(a, tmp1(), 32)
-        debug(a, "INT-MOD %llx\n" tmp1())
-        SET-LOCAL(x, tmp1())
+        xor-op(a, rdx(), rdx())
+        LOCAL(rax(), y), 
+        div(a, LOCAL(tmp2(), value))
+        shl(a, rdx(), 32)
+        debug(a, "INT-MOD %llx\n" rdx())
+        SET-LOCAL(x, rdx())
       INT-AND-OPCODE : ;YYY
         println("C INT-AND")
         and-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
@@ -1181,7 +1187,8 @@ public defn encode (fid:Int, func:VMFunction,
       ADD-OPCODE-BYTE : ;YYY
         println("C ADD-BYTE")
         add(a, LOCAL(tmp1b(), y), LOCAL(tmp2b(), value))
-        SET-LOCAL(x, tmp1b())
+        debug(a, "ADD-BYTE %llx\n" tmp1b())
+        SET-LOCAL(x, tmp1())
       ADD-OPCODE-INT : ;YYY
         println("C ADD-INT")
         add(a, LOCAL(tmp1i(), y), LOCAL(tmp2i(), value))
@@ -1203,12 +1210,12 @@ public defn encode (fid:Int, func:VMFunction,
       SUB-OPCODE-BYTE : ;YYY
         println("C SUB-BYTE")
         sub(a, LOCAL(tmp1b(), y), LOCAL(tmp2b(), value))
-        SET-LOCAL(x, tmp1b())
+        SET-LOCAL(x, tmp1())
       SUB-OPCODE-INT : ;YYY
         println("C SUB-INT")
         sub(a, LOCAL(tmp1i(), y), LOCAL(tmp2i(), value))
         debug(a, "SUB-INT %llx\n" tmp1i())
-        SET-LOCAL(x, tmp1i())
+        SET-LOCAL(x, tmp1())
       SUB-OPCODE-LONG : ;YYY
         println("C SUB-LONG")
         sub(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
@@ -1244,17 +1251,23 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL-DOUBLE(x, xmm0())
       DIV-OPCODE-BYTE : ;YYY
         println("C DIV-BYTE")
-        div(a, LOCAL(tmp1b(), y), LOCAL(tmp2b(), value))
-        SET-LOCAL(x, tmp1b())
+        xor-op(a, rdx(), rdx())
+        LOCAL(al(), y), 
+        div(a, LOCAL(tmp2b(), value))
+        SET-LOCAL(x, al())
       DIV-OPCODE-INT : ;YYY
         println("C DIV-INT")
-        div(a, LOCAL(tmp1i(), y), LOCAL(tmp2i(), value))
-        debug(a, "DIV-INT %llx\n" tmp1i())
-        SET-LOCAL(x, tmp1i())
+        xor-op(a, rdx(), rdx())
+        LOCAL(eax(), y), 
+        div(a, LOCAL(tmp2i(), value))
+        debug(a, "DIV-INT %llx\n" eax())
+        SET-LOCAL(x, eax())
       DIV-OPCODE-LONG : ;YYY
         println("C DIV-LONG")
-        div(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
-        SET-LOCAL(x, tmp1())
+        xor-op(a, rdx(), rdx())
+        LOCAL(rax(), y)
+        div(a, LOCAL(tmp2(), value))
+        SET-LOCAL(x, rax())
       DIV-OPCODE-FLOAT : ;YYY
         println("C DIV-FLOAT")
         divss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
@@ -1265,17 +1278,23 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL-DOUBLE(x, xmm0())
       MOD-OPCODE-BYTE : ;YYY
         println("C MOD-BYTE")
-        mod(a, LOCAL(tmp1b(), y), LOCAL(tmp2b(), value))
-        SET-LOCAL(x, tmp1b())
+        xor-op(a, rdx(), rdx())
+        LOCAL(rax(), y)
+        div(a, LOCAL(tmp2b(), value))
+        SET-LOCAL(x, rdx())
       MOD-OPCODE-INT : ;YYY
         println("C MOD-INT")
-        mod(a, LOCAL(tmp1i(), y), LOCAL(tmp2i(), value))
-        debug(a, "MOD-INT %llx\n" tmp1i())
-        SET-LOCAL(x, tmp1i())
+        xor-op(a, rdx(), rdx())
+        LOCAL(rax(), y)
+        div(a, LOCAL(tmp2i(), value))
+        debug(a, "MOD-INT %llx\n" edx())
+        SET-LOCAL(x, rdx())
       MOD-OPCODE-LONG : ;YYY
         println("C MOD-LONG")
-        mod(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
-        SET-LOCAL(x, tmp1())
+        xor-op(a, rdx(), rdx())
+        LOCAL(rax(), y)
+        div(a, LOCAL(tmp2(), value))
+        SET-LOCAL(x, rdx())
       AND-OPCODE-BYTE : ;YYY
         println("C AND-BYTE")
         and-op(a, LOCAL(tmp1b(), y), LOCAL(tmp2b(), value))
@@ -1496,16 +1515,20 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, tmp1b())
       ALLOC-OPCODE-LOCAL : ;YYY
         println("C ALLOC-LOCAL")
-        mov(a, MemPtr(heap-top(), 0, SIZEOF-LONG), CONST(tmp1(), value))
-        SET-LOCAL(x, ptr-to-ref(tmp2(), heap-top()))
-        add(a, LOCAL(tmp1(), y), 8 + 7)
-        and-op(a, tmp1(), CONST(tmp2(), (- 8L)))
-        lea(a, heap-top(), MemPtr(heap-top(), tmp1(), 0, 0, SIZEOF-BYTE))
+        val top = heap-top() ; TMP1
+        mov(a, MemPtr(top, 0, SIZEOF-LONG), CONST(tmp2(), value))
+        SET-LOCAL(x, ptr-to-ref(tmp2(), top))
+        add(a, LOCAL(tmp2(), y), 8 + 7)
+        and-op(a, tmp2(), CONST(rax(), (- 8L)))
+        add(a, top, tmp2())
+        mov(a, MemPtr(vmstate(), VMSTATE-HEAP-TOP-OFFSET, SIZEOF-LONG), top)
       ALLOC-OPCODE-CONST : ;YYY
-        println("C ALLOC-CONST")
-        mov(a, MemPtr(heap-top(), 0, SIZEOF-LONG), CONST(tmp1(), value))
-        SET-LOCAL(x, ptr-to-ref(tmp2(), heap-top()))
-        lea(a, heap-top(), MemPtr(heap-top(), 8 + y, SIZEOF-BYTE))
+        println("C ALLOC-CONST X %_ Y %_ VALUE %_" % [x, y, value])
+        val top = heap-top() ; TMP1
+        mov(a, MemPtr(top, 0, SIZEOF-LONG), CONST(tmp2(), value))
+        SET-LOCAL(x, ptr-to-ref(tmp2(), top))
+        add(a, top, CONST(tmp2(), 8 + y))
+        mov(a, MemPtr(vmstate(), VMSTATE-HEAP-TOP-OFFSET, SIZEOF-LONG), top)
       else :
         println("MISSING C OPCODE %_" % [opcode])
 
@@ -1541,21 +1564,25 @@ public defn encode (fid:Int, func:VMFunction,
     switch(opcode) :
       STORE-OPCODE-1 : ;YYY
         println("E STORE-1")
-        mov(a, MemPtr(LOCAL(tmp1(), x), CONST(tmp2(), value), 0, 0, SIZEOF-BYTE), LOCAL(tmp1b(), z))
+        debug(a, "STORE-1\n")
+        mov(a, MemPtr(LOCAL(tmp1(), x), CONST(tmp2(), value), 0, 0, SIZEOF-BYTE), LOCAL(al(), z))
       STORE-OPCODE-4 : ;YYY
         println("E STORE-4")
-        mov(a, MemPtr(LOCAL(tmp1(), x), CONST(tmp2(), value), 0, 0, SIZEOF-INT), LOCAL(tmp1i(), z))
+        debug(a, "STORE-4\n")
+        mov(a, MemPtr(LOCAL(tmp1(), x), CONST(tmp2(), value), 0, 0, SIZEOF-INT), LOCAL(eax(), z))
       STORE-OPCODE-8 : ;YYY
-        println("E STORE-8")
-        mov(a, MemPtr(LOCAL(tmp1(), x), CONST(tmp2(), value), 0, 0, SIZEOF-LONG), LOCAL(tmp1(), z))
+        println("E STORE-8 X %_ VALUE %_ Z %_" % [x, value, z])
+        LOCAL(tmp1(), x), CONST(tmp2(), value)
+        debug(a, "STORE-8 %llx %llx\n" tmp1() tmp2())
+        mov(a, MemPtr(LOCAL(tmp1(), x), CONST(tmp2(), value), 0, 0, SIZEOF-LONG), LOCAL(rax(), z))
       STORE-OPCODE-1-VAR-OFFSET : ;YYY
         println("E STORE-1-VAR-OFFSET")
         add(a, LOCAL(tmp2(), y), CONST(tmp1(), value))
-        mov(a, MemPtr(LOCAL(tmp1(), x), tmp2(), 0, 0, SIZEOF-BYTE), LOCAL(tmp1b(), z))
+        mov(a, MemPtr(LOCAL(tmp1(), x), tmp2(), 0, 0, SIZEOF-BYTE), LOCAL(al(), z))
       STORE-OPCODE-4-VAR-OFFSET : ;YYY
         println("E STORE-4-VAR-OFFSET")
         add(a, LOCAL(tmp2(), y), CONST(tmp1(), value))
-        mov(a, MemPtr(LOCAL(tmp1(), x), tmp2(), 0, 0, SIZEOF-INT), LOCAL(tmp1i(), z))
+        mov(a, MemPtr(LOCAL(tmp1(), x), tmp2(), 0, 0, SIZEOF-INT), LOCAL(eax(), z))
       STORE-OPCODE-8-VAR-OFFSET : ;YYY
         println("E STORE-8-VAR-OFFSET")
         add(a, LOCAL(tmp2(), y), CONST(tmp1(), value))
@@ -2123,6 +2150,7 @@ public defn encode (fid:Int, func:VMFunction,
               emit-ins-c(RESERVE-OPCODE-CONST, continue-label, num-locals, sum-of-sizes)
             record-info(info(ins))
             emit-ins-a(POP-FRAME-OPCODE, num-locals)
+            bind(a, continue-label)
             for (x in xs(ins), t in types(ins), sz in obj-sizes) do :
               ;Big object doesn't fit in instruction encoding
               if sz >= 1024 :
@@ -2130,7 +2158,6 @@ public defn encode (fid:Int, func:VMFunction,
                 emit-ins-c(ALLOC-OPCODE-LOCAL, slot(x), size-local, t)
               else :
                 emit-ins-c(ALLOC-OPCODE-CONST, slot(x), sz, t)
-            bind(a, continue-label)
           else:
             fatal("Multiple variable-sized allocations.") when length(sizes(ins)) > 1
             val x = xs(ins)[0]

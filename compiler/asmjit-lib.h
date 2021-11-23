@@ -54,8 +54,8 @@ extern "C" {
   void assembler_mov_ptr_gp(Assembler *a, const MemPtr* mem, Gp *reg);
   void assembler_add_reg(Assembler *a, const Gp *dst, const Gp *src);
   void assembler_imul_reg(Assembler *a, const Gp *dst, const Gp *src);
-  void assembler_div_reg(Assembler *a, const Gp *dst, const Gp *src);
-  void assembler_mod_reg(Assembler *a, const Gp *dst, const Gp *src);
+  void assembler_div_reg(Assembler *a, const Gp *divisor);
+  void assembler_mod_reg(Assembler *a, const Gp *divisor);
   void assembler_add_int(Assembler *a, const Gp *dst, int);
   void assembler_sub_reg(Assembler *a, const Gp *dst, const Gp *src);
   void assembler_and_reg(Assembler *a, const Gp *dst, const Gp *src);

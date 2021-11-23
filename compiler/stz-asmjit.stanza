@@ -46,8 +46,8 @@ extern assembler_add_int: (ptr<?>, ptr<?>, long) -> int
 extern assembler_add_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_sub_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_imul_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
-extern assembler_div_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
-extern assembler_mod_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_div_reg: (ptr<?>, ptr<?>) -> int
+extern assembler_mod_reg: (ptr<?>, ptr<?>) -> int
 extern assembler_and_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_or_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_xor_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
@@ -285,11 +285,11 @@ public lostanza defn add (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<Fal
 public lostanza defn imul (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
   call-c assembler_imul_reg(a.value, dst.value, src.value)
   return false
-public lostanza defn div (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
-  call-c assembler_div_reg(a.value, dst.value, src.value)
+public lostanza defn div (a:ref<Assembler>, divisor:ref<Gp>) -> ref<False> :
+  call-c assembler_div_reg(a.value, divisor.value)
   return false
-public lostanza defn mod (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
-  call-c assembler_mod_reg(a.value, dst.value, src.value)
+public lostanza defn mod (a:ref<Assembler>, divisor:ref<Gp>) -> ref<False> :
+  call-c assembler_mod_reg(a.value, divisor.value)
   return false
 public lostanza defn and-op (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
   call-c assembler_and_reg(a.value, dst.value, src.value)
