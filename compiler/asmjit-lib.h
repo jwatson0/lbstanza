@@ -82,8 +82,12 @@ extern "C" {
   void assembler_set_ae(Assembler *a, const Gp *x);
   void assembler_set_b(Assembler *a, const Gp *x);
   void assembler_set_be(Assembler *a, const Gp *x);
-  void assembler_movss(Assembler *a, const Xmm *dst, const Xmm *src);
-  void assembler_movsd(Assembler *a, const Xmm *dst, const Xmm *src);
+  void assembler_movss_xmm_xmm(Assembler *a, const Xmm *dst, const Xmm *src);
+  void assembler_movss_xmm_mem(Assembler *a, MemPtr *dst, const Xmm *src);
+  void assembler_movss_mem_xmm(Assembler *a, const Xmm *dst, MemPtr *src);
+  void assembler_movsd_xmm_xmm(Assembler *a, const Xmm *dst, const Xmm *src);
+  void assembler_movsd_xmm_mem(Assembler *a, MemPtr *dst, const Xmm *src);
+  void assembler_movsd_mem_xmm(Assembler *a, const Xmm *dst, MemPtr *src);
   void assembler_cvtss2sd(Assembler *a, const Xmm *dst, const Xmm *src);
   void assembler_cvtsd2ss(Assembler *a, const Xmm *dst, const Xmm *src);
   void assembler_cvtsi2ss(Assembler *a, const Xmm *dst, const Gp *src);

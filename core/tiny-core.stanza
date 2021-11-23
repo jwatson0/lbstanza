@@ -69,6 +69,7 @@ public defn fatal (msg) -> Void : halt()
 protected lostanza defn arity-error (arity:long) -> ref<Void> : return fatal(String("AE"))
 protected defn no-method-error (multi:String, args:Tuple) : fatal("NME")
 protected defn amb-method-error (multi:String, args:Tuple) : fatal("AME")
+protected defn amb-branch-error (args:Tuple) : fatal("ABE")
 protected lostanza defn tuple-length-error (actual-len:long, expected-len:long) -> ref<Void> : return fatal(String("TLE"))
 protected defn no-branch-error (args:Tuple) : fatal("NBE")
 protected lostanza defn cast-error (type:ref<Type>, obj:ref<?>, ctxt:int) -> ref<Void> : return fatal(String("CE"))
@@ -86,37 +87,283 @@ defn execute-toplevel-command (f:() -> False) -> True|False : false
 
 ;;; APP
 
-protected extern printf: (ptr<byte>, ? ...) -> int
-
-lostanza defn debug (x:ref<Int>) -> ref<False> :
-  call-c printf("HELLO WORLD %d\n" x.value)
-  return false
-
-defn plus (a:Int, b:Int) -> Int :
-  ($prim add a b)
-
-defn minus (a:Int, b:Int) -> Int :
-  ($prim sub a b)
-
-defn equal? (a:Int, b:Int) -> True|False :
-  ($prim eq a b)
-
-defn count (n:Int) -> Int :
-  let loop (c:Int = n) :
-    if c == 0 :
-      n
-    else :
-      loop(c - 1)
-
-defn main () :
-  ; debug(count(1 + 2))
-  count(3)
-
-main()
-
-; lostanza defn main () -> ref<False> :
-;   call-c printf("HELLO WORLD\n")
+; protected extern printf: (ptr<byte>, ? ...) -> int
+; 
+; lostanza defn debug (x:ref<Int>) -> ref<False> :
+;   call-c printf("HELLO WORLD %d\n" x.value)
 ;   return false
-;
+; 
+; defn plus (a:Int, b:Int) -> Int :
+;   ($prim add a b)
+; 
+; defn minus (a:Int, b:Int) -> Int :
+;   ($prim sub a b)
+; 
+; defn equal? (a:Int, b:Int) -> True|False :
+;   ($prim eq a b)
+; 
+; defn count-loop (n:Int) -> Int :
+;   let loop (c:Int = n) :
+;     if c == 0 :
+;       n
+;     else :
+;       loop(c - 1)
+; 
+; defn count-recursive (n:Int, c:Int) -> Int :
+;   if c == 0 :
+;     n
+;   else :
+;     count-recursive(n, c - 1)
+; 
+; defn main () :
+;   ; debug(count(1 + 2))
+;   ; count(3)
+;   debug(count-recursive(3, 3))
+;   ; debug(95 + 1) 
+; 
+; main()
+; 
+; ; lostanza defn main () -> ref<False> :
+; ;   call-c printf("HELLO WORLD\n")
+; ;   return false
+; ;
+; ; main()
+
+; defstruct Person :
+;   age : Int
+; 
+; defn main () :
+;   val p = Person(1)
+;   age(p)
+; 
 ; main()
 
+protected extern printf: (ptr<byte>, ? ...) -> int
+ 
+lostanza defn error (msg:ptr<byte>) -> ref<False> :
+  call-c printf(msg)
+  return false
+
+lostanza defn test () -> ref<False> :
+  ;Floats
+  if (- 1.0f) != -1.0f :
+    error("!!! ERROR: FLOAT NEG\n")
+  if (1.0f + 2.0f) != 3.0f :
+    error("!!! ERROR: FLOAT PLUS\n")
+  if (1.0f - 2.0f) != -1.0f :
+    error("!!! ERROR: FLOAT MINUS\n")
+  if (2.0f * 3.0f) != 6.0f :
+    error("!!! ERROR: FLOAT MUL\n")
+  if (6.0f / 3.0f) != 2.0f :
+    error("!!! ERROR: FLOAT DIV\n")
+  if (1.0f < 2.0f) != 0 :
+    error("!!! ERROR: FLOAT LESS\n")
+  if (1.0f > 2.0f) != 0 :
+    error("!!! ERROR: FLOAT GREATER\n")
+  if (1.0f <= 2.0f) != 1 :
+    error("!!! ERROR: FLOAT LESS EQUAL\n")
+  if (1.0f >= 2.0f) != 0 :
+    error("!!! ERROR: FLOAT GREATER EQUAL\n")
+
+  ;Doubles
+  if (- 1.0) != -1.0 :
+    error("!!! ERROR: DOUBLE NEG\n")
+  if (1.0 + 2.0) != 3.0 :
+    error("!!! ERROR: DOUBLE PLUS\n")
+  if (1.0 - 2.0) != -1.0 :
+    error("!!! ERROR: DOUBLE MINUS\n")
+  if (2.0 * 3.0) != 6.0 :
+    error("!!! ERROR: DOUBLE MUL\n")
+  if (6.0 / 3.0) != 2.0 :
+    error("!!! ERROR: DOUBLE DIV\n")
+  if (1.0 < 2.0) != 0 :
+    error("!!! ERROR: DOUBLE LESS\n")
+  if (1.0 > 2.0) != 0 :
+    error("!!! ERROR: DOUBLE GREATER\n")
+  if (1.0 <= 2.0) != 1 :
+    error("!!! ERROR: DOUBLE LESS EQUAL\n")
+  if (1.0 >= 2.0) != 0 :
+    error("!!! ERROR: DOUBLE GREATER EQUAL\n")
+
+  ;Conversions
+  if (1L as int) != 1 :
+    error("!!! ERROR: LONG TO INT CONVERSION\n")
+  if (1 as long) != 1L :
+    error("!!! ERROR: INT TO LONG CONVERSION\n")
+  if (1Y as int) != 1 :
+    error("!!! ERROR: BYTE TO INT CONVERSION\n")
+  if (1 as byte) != 1Y :
+    error("!!! ERROR: INT TO BYTE CONVERSION\n")
+  if (1Y as long) != 1L :
+    error("!!! ERROR: BYTE TO LONG CONVERSION\n")
+  if (1L as byte) != 1Y :
+    error("!!! ERROR: LONG TO BYTE CONVERSION\n")
+
+  if (1.0f as int) != 1 :
+    error("!!! ERROR: FLOAT TO INT CONVERSION\n")
+  if (1 as float) != 1.0f :
+    error("!!! ERROR: INT TO FLOAT CONVERSION\n")
+  if (1.0f as long) != 1L :
+    error("!!! ERROR: FLOAT TO LONG CONVERSION\n")
+  if (1L as float) != 1.0f :
+    error("!!! ERROR: LONG TO FLOAT CONVERSION\n")
+  if (1.0f as byte) != 1Y :
+    error("!!! ERROR: FLOAT TO BYTE CONVERSION\n")
+  if (1Y as float) != 1.0f :
+    error("!!! ERROR: BYTE TO FLOAT CONVERSION\n")
+
+  if (1.0 as int) != 1 :
+    error("!!! ERROR: DOUBLE TO INT CONVERSION\n")
+  if (1 as double) != 1.0 :
+    error("!!! ERROR: INT TO DOUBLE CONVERSION\n")
+  if (1.0 as long) != 1L :
+    error("!!! ERROR: DOUBLE TO LONG CONVERSION\n")
+  if (1L as double) != 1.0 :
+    error("!!! ERROR: LONG TO DOUBLE CONVERSION\n")
+  if (1.0 as byte) != 1Y :
+    error("!!! ERROR: DOUBLE TO BYTE CONVERSION\n")
+  if (1Y as double) != 1.0 :
+    error("!!! ERROR: BYTE TO DOUBLE CONVERSION\n")
+  if (1.0 as float) != 1.0f :
+    error("!!! ERROR: DOUBLE TO FLOAT CONVERSION\n")
+  if (1.0f as double) != 1.0 :
+    error("!!! ERROR: FLOAT TO DOUBLE CONVERSION\n")
+
+;   if (1Y + 2Y) != 3Y :
+;     error("!!! ERROR: BYTE PLUS\n")
+;   if (3Y - 2Y) != 1Y :
+;     error("!!! ERROR: BYTE MINUS\n")
+;   ; if (2Y * 3Y) != 6Y :
+;   ;   error("!!! ERROR: BYTE MUL\n")
+;   ; if (6Y / 3Y) != 2Y :
+;   ;   error("!!! ERROR: BYTE DIV\n")
+;   ; if (5Y % 2Y) != 1Y :
+;   ;   error("!!! ERROR: BYTE MOD\n")
+;   if (3Y & 2Y) != 2Y :
+;     error("!!! ERROR: BYTE AND\n")
+;   if (3Y | 2Y) != 3Y :
+;     error("!!! ERROR: BYTE OR\n")
+;   if (3Y ^ 2Y) != 1Y :
+;     error("!!! ERROR: BYTE XOR\n")
+;   if (3Y << 2Y) != 12Y :
+;     error("!!! ERROR: BYTE SHL\n")
+;   if (12Y >> 2Y) != 3Y :
+;     error("!!! ERROR: BYTE SHR\n")
+;   if (1Y < 2Y) != 1Y :
+;     error("!!! ERROR: BYTE LESS\n")
+;   if (1Y > 2Y) != 0Y :
+;     error("!!! ERROR: BYTE GREATER\n")
+;   if (1Y <= 2Y) != 1Y :
+;     error("!!! ERROR: BYTE LESS EQUAL\n")
+;   if (1Y >= 2Y) != 0Y :
+;     error("!!! ERROR: BYTE GREATER EQUAL\n")
+; 
+;   if (1 + 2) != 3 :
+;     error("!!! ERROR: INT PLUS\n")
+;   if (1 - 2) != -1 :
+;     error("!!! ERROR: INT MINUS\n")
+;   if (2 * 3) != 6 :
+;     error("!!! ERROR: INT MUL\n")
+;   if (6 / 3) != 2 :
+;     error("!!! ERROR: INT DIV\n")
+;   if (5 % 2) != 1 :
+;     error("!!! ERROR: INT MOD\n")
+;   if (3 & 2) != 2 :
+;     error("!!! ERROR: INT AND\n")
+;   if (3 | 2) != 3 :
+;     error("!!! ERROR: INT OR\n")
+;   if (3 ^ 2) != 1 :
+;     error("!!! ERROR: INT XOR\n")
+;   if (3 << 2) != 12 :
+;     error("!!! ERROR: INT SHL\n")
+;   if (12 >> 2) != 3 :
+;     error("!!! ERROR: INT SHR\n")
+;   if (-12 >>> 2) != -3 :
+;     error("!!! ERROR: INT ASHR\n")
+;   if (1 < 2) != 1 :
+;     error("!!! ERROR: INT LESS\n")
+;   if (1 > 2) != 0 :
+;     error("!!! ERROR: INT GREATER\n")
+;   if (1 <= 2) != 1 :
+;     error("!!! ERROR: INT LESS EQUAL\n")
+;   if (1 >= 2) != 0 :
+;     error("!!! ERROR: INT GREATER EQUAL\n")
+; 
+;   if (1L + 2L) != 3L :
+;     error("!!! ERROR: LONG PLUS\n")
+;   if (1L - 2L) != -1L :
+;     error("!!! ERROR: LONG MINUS\n")
+;   if (2L * 3L) != 6L :
+;     error("!!! ERROR: LONG MUL\n")
+;   if (6L / 3L) != 2L :
+;     error("!!! ERROR: LONG DIV\n")
+;   if (5L % 2L) != 1L :
+;     error("!!! ERROR: LONG MOD\n")
+;   if (3L & 2L) != 2L :
+;     error("!!! ERROR: LONG AND\n")
+;   if (3L | 2L) != 3L :
+;     error("!!! ERROR: LONG OR\n")
+;   if (3L ^ 2L) != 1L :
+;     error("!!! ERROR: LONG XOR\n")
+;   if (3L << 2L) != 12L :
+;     error("!!! ERROR: LONG SHL\n")
+;   if (12L >> 2L) != 3L :
+;     error("!!! ERROR: LONG SHR\n")
+;   if (-12L >>> 2L) != -3L :
+;     error("!!! ERROR: LONG ASHR\n")
+;   if (1L < 2L) != 1L :
+;     error("!!! ERROR: LONG LESS\n")
+;   if (1L > 2L) != 0L :
+;     error("!!! ERROR: LONG GREATER\n")
+;   if (1L <= 2L) != 1L :
+;     error("!!! ERROR: LONG LESS EQUAL\n")
+;   if (1L >= 2L) != 0L :
+;     error("!!! ERROR: LONG GREATER EQUAL\n")
+  return false
+
+test()
+
+; ;DEFSTRUCT
+; protected extern printf: (ptr<byte>, ? ...) -> int
+;  
+; lostanza defn debug (x:ref<Int>) -> ref<False> :
+;   call-c printf("HELLO WORLD %llx\n" x.value)
+;   return false
+; 
+; defstruct Person :
+;   age : Int
+; 
+; debug(age(Person(11)))
+
+; ;DEFN DISPATCH
+; protected extern printf: (ptr<byte>, ? ...) -> int
+;  
+; lostanza defn debug (x:ref<Int>) -> ref<False> :
+;   call-c printf("HELLO WORLD %llx\n" x.value)
+;   return false
+; 
+; defn plus (a:Int, b:Int) -> Int : ($prim add a b)
+; 
+; defn f (a:Int) : a + 1
+; defn f (a:Float) : a
+;  
+; defn g (a:Int|Float) : f(a)
+; 
+; debug(g(1) as Int)
+
+; ;MULTI DISPATCH
+; protected extern printf: (ptr<byte>, ? ...) -> int
+;  
+; lostanza defn debug (x:ref<Int>) -> ref<False> :
+;   call-c printf("HELLO WORLD %llx\n" x.value)
+;   return false
+; 
+; defn plus (a:Int, b:Int) -> Int : ($prim add a b)
+; 
+; defmulti f (a:?) -> Int|Float
+; defmethod f (a:Int) : a + 1
+; defmethod f (a:Float) : a
+;  
+; defn g (a:Int|Float) : f(a)
+; 
+; debug(g(1) as Int)

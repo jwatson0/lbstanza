@@ -60,8 +60,12 @@ extern assembler_shl_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_shr_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_ashr_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 
-extern assembler_movss: (ptr<?>, ptr<?>, ptr<?>) -> int
-extern assembler_movsd: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_movss_xmm_xmm: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_movss_mem_xmm: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_movss_xmm_mem: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_movsd_xmm_xmm: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_movsd_mem_xmm: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_movsd_xmm_mem: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_cvtss2sd: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_cvtsd2ss: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_cvtsi2ss: (ptr<?>, ptr<?>, ptr<?>) -> int
@@ -364,6 +368,7 @@ public lostanza defn lea (a:ref<Assembler>, reg:ref<Gp>, ptr:ref<MemPtr>) -> ref
 public lostanza defn cmp (a:ref<Assembler>, x:ref<Gp>, y:ref<Gp>) -> ref<False> :
   call-c assembler_cmp(a.value, x.value, y.value)
   return false
+
 public lostanza defn set-e (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
   call-c assembler_set_e(a.value, x.value)
   return false
@@ -400,6 +405,45 @@ public lostanza defn set-b (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
 public lostanza defn set-be (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
   call-c assembler_set_be(a.value, x.value)
   return false
+
+;Versions that clear dst register first
+public defn set-e! (a:Assembler, x:Gp, xb:Gp) :
+  xor-op(a, x, x)
+  set-e(a, xb)
+public defn set-ne! (a:Assembler, x:Gp, xb:Gp) :
+  xor-op(a, x, x)
+  set-ne(a, xb)
+public defn set-s! (a:Assembler, x:Gp, xb:Gp) :
+  xor-op(a, x, x)
+  set-s(a, xb)
+public defn set-ns! (a:Assembler, x:Gp, xb:Gp) :
+  xor-op(a, x, x)
+  set-ns(a, xb)
+public defn set-g! (a:Assembler, x:Gp, xb:Gp) :
+  xor-op(a, x, x)
+  set-g(a, xb)
+public defn set-ge! (a:Assembler, x:Gp, xb:Gp) :
+  xor-op(a, x, x)
+  set-ge(a, xb)
+public defn set-l! (a:Assembler, x:Gp, xb:Gp) :
+  xor-op(a, x, x)
+  set-l(a, xb)
+public defn set-le! (a:Assembler, x:Gp, xb:Gp) :
+  xor-op(a, x, x)
+  set-le(a, xb)
+public defn set-a! (a:Assembler, x:Gp, xb:Gp) :
+  xor-op(a, x, x)
+  set-a(a, xb)
+public defn set-ae! (a:Assembler, x:Gp, xb:Gp) :
+  xor-op(a, x, x)
+  set-ae(a, xb)
+public defn set-b! (a:Assembler, x:Gp, xb:Gp) :
+  xor-op(a, x, x)
+  set-b(a, xb)
+public defn set-be! (a:Assembler, x:Gp, xb:Gp) :
+  xor-op(a, x, x)
+  set-be(a, xb)
+
 
 public lostanza defn jmp (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
   call-c assembler_jmp_label(a.value, lab.value)
@@ -448,10 +492,22 @@ public lostanza defn jbe (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
   return false
 
 public lostanza defn movss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
-  call-c assembler_movss(a.value, dst.value, src.value)
+  call-c assembler_movss_xmm_xmm(a.value, dst.value, src.value)
+  return false
+public lostanza defn movss (a:ref<Assembler>, dst:ref<MemPtr>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_movss_xmm_mem(a.value, dst.value, src.value)
+  return false
+public lostanza defn movss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<MemPtr>) -> ref<False> :
+  call-c assembler_movss_mem_xmm(a.value, dst.value, src.value)
   return false
 public lostanza defn movsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
-  call-c assembler_movsd(a.value, dst.value, src.value)
+  call-c assembler_movsd_xmm_xmm(a.value, dst.value, src.value)
+  return false
+public lostanza defn movsd (a:ref<Assembler>, dst:ref<MemPtr>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_movsd_xmm_mem(a.value, dst.value, src.value)
+  return false
+public lostanza defn movsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<MemPtr>) -> ref<False> :
+  call-c assembler_movsd_mem_xmm(a.value, dst.value, src.value)
   return false
 public lostanza defn cvtsd2ss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
   call-c assembler_cvtsd2ss(a.value, dst.value, src.value)
