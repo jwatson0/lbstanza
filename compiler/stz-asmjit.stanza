@@ -131,6 +131,10 @@ extern x86_r12: () -> ptr<?>
 extern x86_r13: () -> ptr<?>
 extern x86_r14: () -> ptr<?>
 extern x86_r15: () -> ptr<?>
+extern x86_r14d: () -> ptr<?>
+extern x86_r15d: () -> ptr<?>
+extern x86_r14b: () -> ptr<?>
+extern x86_r15b: () -> ptr<?>
 extern x86_xmm0: () -> ptr<?>
 extern x86_xmm1: () -> ptr<?>
 
@@ -218,6 +222,14 @@ public lostanza defn r14 () -> ref<Gp> :
   return new Gp{ call-c x86_r14() }
 public lostanza defn r15 () -> ref<Gp> :
   return new Gp{ call-c x86_r15() }
+public lostanza defn r14d () -> ref<Gp> :
+  return new Gp{ call-c x86_r14d() }
+public lostanza defn r15d () -> ref<Gp> :
+  return new Gp{ call-c x86_r15d() }
+public lostanza defn r14b () -> ref<Gp> :
+  return new Gp{ call-c x86_r14b() }
+public lostanza defn r15b () -> ref<Gp> :
+  return new Gp{ call-c x86_r15b() }
 public lostanza defn xmm0 () -> ref<Xmm> :
   return new Xmm{ call-c x86_xmm0() }
 public lostanza defn xmm1 () -> ref<Xmm> :
@@ -443,6 +455,9 @@ public lostanza defn movsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref
   return false
 public lostanza defn cvtsd2ss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
   call-c assembler_cvtsd2ss(a.value, dst.value, src.value)
+  return false
+public lostanza defn cvtss2sd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_cvtss2sd(a.value, dst.value, src.value)
   return false
 public lostanza defn cvtsi2ss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Gp>) -> ref<False> :
   call-c assembler_cvtsi2ss(a.value, dst.value, src.value)

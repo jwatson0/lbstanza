@@ -378,6 +378,18 @@ const Gp* x86_r14(void) {
 const Gp* x86_r15(void) {
   return &r15;
 }
+const Gp* x86_r14d(void) {
+  return &r14d;
+}
+const Gp* x86_r15d(void) {
+  return &r15d;
+}
+const Gp* x86_r14b(void) {
+  return &r14b;
+}
+const Gp* x86_r15b(void) {
+  return &r15b;
+}
 const Xmm* x86_xmm0(void) {
   return &xmm0;
 }
@@ -427,6 +439,14 @@ void dump_registers (void) {
   uint64_t r9;
   asm("\t movq %%r9,%0" : "=r"(r9));  
   printf("R9 = %llx\n", r9);
+  uint64_t xmm0;
+  asm("\t movd %%xmm0,%0" : "=r"(rax));  
+  asm("\t movq %%rax,%0" : "=r"(xmm0));  
+  printf("XMM0 = %llx\n", xmm0);
+  uint64_t xmm1;
+  asm("\t movd %%xmm1,%0" : "=r"(rax));  
+  asm("\t movq %%rax,%0" : "=r"(xmm1));  
+  printf("XMM1 = %llx\n", xmm1);
 }
 void dump_memory_64 (uint64_t* start, uint64_t n) {
   uint64_t i = 0;

@@ -142,6 +142,10 @@ extern "C" {
   const Gp* x86_r13(void);
   const Gp* x86_r14(void);
   const Gp* x86_r15(void);
+  const Gp* x86_r14d(void);
+  const Gp* x86_r15d(void);
+  const Gp* x86_r14b(void);
+  const Gp* x86_r15b(void);
   const Xmm* x86_xmm0(void);
   const Xmm* x86_xmm1(void);
   void dump_registers (void);

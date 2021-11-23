@@ -1138,7 +1138,7 @@ public defn load (vm:VirtualMachine, vmps:Collection<VMPackage>, keep-existing-g
     val extend-stack-return = make-extend-stack-return(jit-runtime(vm))
     val extend-stack-launch = make-extend-stack-launch(jit-runtime(vm), extend-stack-return)
     for f in funcs(load-unit) do :
-      println("ENCODING %_" % [id(f)])
+      println("--- ENCODING %_" % [id(f)])
       val ef = encode(id(f), func(f), jit-runtime(vm), encoding-resolver,
                       extend-stack-launch, extend-stack-return, backend(vm))
       load-function(vmt, id(f), ef)
