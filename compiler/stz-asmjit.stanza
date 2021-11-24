@@ -406,45 +406,6 @@ public lostanza defn set-be (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
   call-c assembler_set_be(a.value, x.value)
   return false
 
-;Versions that clear dst register first
-public defn set-e! (a:Assembler, x:Gp, xb:Gp) :
-  xor-op(a, x, x)
-  set-e(a, xb)
-public defn set-ne! (a:Assembler, x:Gp, xb:Gp) :
-  xor-op(a, x, x)
-  set-ne(a, xb)
-public defn set-s! (a:Assembler, x:Gp, xb:Gp) :
-  xor-op(a, x, x)
-  set-s(a, xb)
-public defn set-ns! (a:Assembler, x:Gp, xb:Gp) :
-  xor-op(a, x, x)
-  set-ns(a, xb)
-public defn set-g! (a:Assembler, x:Gp, xb:Gp) :
-  xor-op(a, x, x)
-  set-g(a, xb)
-public defn set-ge! (a:Assembler, x:Gp, xb:Gp) :
-  xor-op(a, x, x)
-  set-ge(a, xb)
-public defn set-l! (a:Assembler, x:Gp, xb:Gp) :
-  xor-op(a, x, x)
-  set-l(a, xb)
-public defn set-le! (a:Assembler, x:Gp, xb:Gp) :
-  xor-op(a, x, x)
-  set-le(a, xb)
-public defn set-a! (a:Assembler, x:Gp, xb:Gp) :
-  xor-op(a, x, x)
-  set-a(a, xb)
-public defn set-ae! (a:Assembler, x:Gp, xb:Gp) :
-  xor-op(a, x, x)
-  set-ae(a, xb)
-public defn set-b! (a:Assembler, x:Gp, xb:Gp) :
-  xor-op(a, x, x)
-  set-b(a, xb)
-public defn set-be! (a:Assembler, x:Gp, xb:Gp) :
-  xor-op(a, x, x)
-  set-be(a, xb)
-
-
 public lostanza defn jmp (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
   call-c assembler_jmp_label(a.value, lab.value)
   return false
