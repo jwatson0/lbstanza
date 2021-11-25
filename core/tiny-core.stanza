@@ -87,48 +87,168 @@ defn execute-toplevel-command (f:() -> False) -> True|False : false
 
 ;;; APP
 
-protected extern printf: (ptr<byte>, ? ...) -> int
+; SIGN EXTENSION
 
-lostanza defn debug (x:ref<Int>) -> ref<False> :
-  call-c printf("HELLO WORLD %d\n" x.value)
+protected extern printf: (ptr<byte>, ? ...) -> int
+ 
+lostanza defn error (msg:ptr<byte>) -> ref<False> :
+  call-c printf(msg)
   return false
 
-defn plus (a:Int, b:Int) -> Int :
-  ($prim add a b)
+lostanza defn test () -> ref<False> :
+  if (- 1) != -1 :
+    error("!!! ERROR: INT NEGATION\n")
+  if (1 - 2) != -1 :
+    error("!!! ERROR: INT MINUS\n")
+  if (1 * -1) != -1 :
+    error("!!! ERROR: INT MULTIPLY\n")
+  if (1 / -1) != -1 :
+    error("!!! ERROR: INT DIVIDE\n")
+  if (3 % 2) != 1 :
+    error("!!! ERROR: INT MODULO\n")
+  return false
 
-defn minus (a:Int, b:Int) -> Int :
-  ($prim sub a b)
+test()
 
-defn equal? (a:Int, b:Int) -> True|False :
-  ($prim eq a b)
+; ; EXTEND STACK
+; 
+; defn minus (a:Int, b:Int) -> Int : ($prim sub a b)
+; defn equal? (a:Int, b:Int) -> True|False : ($prim eq a b)
+; 
+; defn recursive (c:Int) -> Int :
+;   if c == 0 :
+;     0
+;   else :
+;     recursive(c - 1)
+; 
+; defn main () :
+;   recursive(1024)
+; 
+; main()
 
-defn count-loop (n:Int) -> Int :
-  let loop (c:Int = n) :
-    if c == 0 :
-      n
-    else :
-      loop(c - 1)
+; ; EXTEND HEAP
+; 
+; lostanza deftype Stuff :
+;   length : long
+;   data : long ...
+; 
+; lostanza defn Stuff (n:ref<Int>) -> ref<Stuff> :
+;   return new Stuff{n.value}
+; 
+; defn minus (a:Int, b:Int) -> Int : ($prim sub a b)
+; defn shift-left (a:Int, b:Int) -> Int : ($prim shl a b)
+; defn greater? (a:Int, b:Int) -> True|False : ($prim gt a b)
+; 
+; defn cons (n:Int, s:Int) :
+;   let loop (n:Int = n) :
+;     if n > 0 :
+;       Stuff(s)
+;       loop(n - 1)
+; 
+; defn main () : cons(1, 1 << 24)
+; 
+; main()
 
-defn count-accumulator (n:Int) -> Int :
-  let loop (c:Int = n, r:Int = 0) :
-    if c == 0 :
-      r
-    else :
-      loop(c - 1, r + 1)
+; ; LONGS
+; 
+; lostanza defn exchange (n:ref<Long>) -> ref<Int> :
+;   return new Int{n.value as int}
+; 
+; defn main () : exchange(256L)
+; 
+; main()
 
-defn count-recursive (n:Int, c:Int) -> Int :
-  if c == 0 :
-    n
-  else :
-    count-recursive(n, c - 1)
+; ; TAIL CALLS
+; 
+; protected extern printf: (ptr<byte>, ? ...) -> int
+; 
+; lostanza defn error (x:ref<Int>) -> ref<False> :
+;   call-c printf("WRONG ANSWER: %d\n", x.value)
+;   return false
+; 
+; defn plus (a:Int, b:Int) -> Int : ($prim add a b)
+; defn minus (a:Int, b:Int) -> Int : ($prim sub a b)
+; defn greater? (a:Int, b:Int) -> True|False : ($prim gt a b)
+; defn equal? (a:Int, b:Int) -> True|False : ($prim eq a b)
+; public defn complement (a:True|False) -> True|False :
+;   if a : false
+;   else : true
+; 
+; defn* sum (n:Int, total:Int) :
+;   if n > 0 : sum(n - 1, total + n)
+;   else : total
+;   
+; defn main () :
+;   val i = sum(0, 0)
+;   val r = sum(10, 0)
+;   if not (r == 55) : error(r)
+; 
+; main()
 
-defn main () :
-  ; debug(count(1 + 2))
-  debug(count-accumulator(3))
-  ; debug(count-recursive(3, 3))
-  ; debug(95 + 1) 
+; ; CLOSURES
+; 
+; protected extern printf: (ptr<byte>, ? ...) -> int
+; 
+; lostanza defn debug (x:ref<Int>) -> ref<False> :
+;   call-c printf("HELLO WORLD %d\n" x.value)
+;   return false
+; 
+; defn plus (a:Int, b:Int) -> Int :
+;   ($prim add a b)
+; 
+; defn closure (x:Int) :
+;   fn () : x + 1
+; 
+; defn main () :
+;   val f = closure(3)
+;   debug(f())
+; 
+; main()
 
-main()
+; ;Let loops
+; protected extern printf: (ptr<byte>, ? ...) -> int
+; 
+; lostanza defn debug (x:ref<Int>) -> ref<False> :
+;   call-c printf("HELLO WORLD %d\n" x.value)
+;   return false
+; 
+; defn plus (a:Int, b:Int) -> Int :
+;   ($prim add a b)
+; 
+; defn minus (a:Int, b:Int) -> Int :
+;   ($prim sub a b)
+; 
+; defn equal? (a:Int, b:Int) -> True|False :
+;   ($prim eq a b)
+; 
+; defn count-loop (n:Int) -> Int :
+;   let loop (c:Int = n) :
+;     if c == 0 :
+;       n
+;     else :
+;       loop(c - 1)
+; 
+; defn count-accumulator (n:Int) -> Int :
+;   let loop (c:Int = n, r:Int = 0) :
+;     if c == 0 :
+;       r
+;     else :
+;       loop(c - 1, r + 1)
+; 
+; defn count-recursive (n:Int, c:Int) -> Int :
+;   if c == 0 :
+;     n
+;   else :
+;     count-recursive(n, c - 1)
+; 
+; defn main () :
+;   ; debug(count(1 + 2))
+;   debug(count-accumulator(3))
+;   debug(count-loop(3))
+;   debug(count-recursive(3, 3))
+;   ; debug(95 + 1) 
+; 
+; main()
 
 ; ; lostanza defn main () -> ref<False> :
 ; ;   call-c printf("HELLO WORLD\n")
