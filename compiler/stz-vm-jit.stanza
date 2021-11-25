@@ -339,17 +339,32 @@ defn CONST (a:Assembler, x:Gp, id:Int|Long) -> Gp : (mov(a, x, to-long(id)), x)
 defn SET-REG (a:Assembler, r:Int, v:Gp) :
   mov(a, MemPtr(registers(), r * SIZEOF-LONG, SIZEOF-LONG), v)
 
+defn dump-stack-frame (a:Assembler, sp:Gp) :
+  debug(a, "STACK-FRAME:\n")
+  dump-memory-64(a, sp, 3L)
+
+defn dump-state (a:Assembler, msg:String) :
+  debug(a, msg)
+  dump-memory-64(a, vmstate(), 17L)
+  debug(a, "REGISTERS:     %llx\n", registers())
+  debug(a, "CURRENT-STACK: %llx\n", current-stack())
+  debug(a, "STK:           %llx\n", stk())
+  debug(a, "STACK-POINTER: %llx\n", stack-pointer())
+  dump-memory-64(a, stack-pointer(), 6L)
+
 public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func) -> Func :
   val size-required = rdx()
   val code = code-holder-new(rt)
   val a = assembler-new(code)
   val end-label = new-label(a)
   debug(a, "EXTEND-STACK %llx\n", size-required)
+  ; dump-state(a, "STATE BEFORE:\n")
+  ; mov(a, tmp2(), stack-pointer()) ; SAVE SP
   ;Save current stack
   mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), stack-pointer())
-  lea(a, tmp1(), MemPtr(end-label, 0, SIZEOF-LONG))
+  ; lea(a, tmp1(), MemPtr(end-label, 0, SIZEOF-LONG))
   ;Swap stack and registers
-  mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), tmp1())
+  ; mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), tmp1())
   mov(a, MemPtr(vmstate(), VMSTATE-CURRENT-STACK-OFFSET, SIZEOF-LONG), vmstate-reg(a, VMSTATE-SYSTEM-STACK-OFFSET))
   mov(a, MemPtr(vmstate(), VMSTATE-SYSTEM-STACK-OFFSET, SIZEOF-LONG), current-stack())
   mov(a, MemPtr(vmstate(), VMSTATE-REGISTERS-OFFSET, SIZEOF-LONG), vmstate-reg(a, VMSTATE-SYSTEM-REGISTERS-OFFSET))
@@ -360,13 +375,20 @@ public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func)
   mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG))
   mov(a, registers(), MemPtr(vmstate(), VMSTATE-REGISTERS-OFFSET, SIZEOF-LONG))
   ;Set arguments
+  ; dump-stack-frame(a, tmp2())
   SET-REG(a, 0, do-BOOLREF(a, CONST(a, tmp1(), 0)))
   SET-REG(a, 1, CONST(a, tmp1(), 1))
   SET-REG(a, 1, size-required)
+  ; dump-stack-frame(a, tmp2())
   mov(a, stack-pointer(), MemPtr(stk(), STACK-FRAMES-OFFSET, SIZEOF-LONG))
   mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), CONST(a, tmp1(), value(stack-overflow-return)))
+  ; dump-stack-frame(a, tmp2())
+  ; dump-state(a, "STATE AFTER:\n")
   mov(a, tmp2(), MemPtr(functions(), SIZEOF-LONG * EXTEND-STACK-FN, SIZEOF-LONG))
   jmp(a, tmp2())
+  ; ;TEST INVERSE
+  ; mov(a, tmp2(), value(stack-overflow-return))
+  ; jmp(a, tmp2())
   bind(a, end-label)
   add(rt, code)
 
@@ -375,6 +397,7 @@ public defn make-extend-stack-return (rt:JitRuntime) -> Func :
   val a = assembler-new(code)
   ;System stack no longer needed
   debug(a, "EXTEND-STACK-RETURN\n")
+  ; dump-state(a, "STATE BEFORE:\n")
   mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), CONST(a, tmp1(), 0))
   debug(a, "SWAP-STACK-AND-REGISTERS\n")
   ;Swap stack and registers
@@ -388,8 +411,9 @@ public defn make-extend-stack-return (rt:JitRuntime) -> Func :
   untag-stack(a, stk(), current-stack())
   mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG))
   mov(a, registers(), MemPtr(vmstate(), VMSTATE-REGISTERS-OFFSET, SIZEOF-LONG))
+  ; dump-state(a, "STATE AFTER:\n")
   ;Continue where we were
-  mov(a, tmp1(), MemPtr(stk(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
+  mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
   debug(a, "CONTINUE-WHERE-WE-WERE %llx\n" tmp1())
   jmp(a, tmp1())
   add(rt, code)
@@ -606,6 +630,7 @@ public defn encode (fid:Int, func:VMFunction,
     switch(opcode) :
       FNENTRY-OPCODE : ;YYY
         println("A FNENTRY")
+        ; dump-state(a, "FNENTRY:\n")
         val all-good-label = new-label(a)
         val frame-size = value * SIZEOF-LONG + SIZEOF-STACK-FRAME
         val size-required = frame-size + SIZEOF-STACK-FRAME
@@ -616,6 +641,7 @@ public defn encode (fid:Int, func:VMFunction,
         jle(a, all-good-label)
         CONST(tmp3(), size-required)
         debug(a, "STACK-OVERFLOW %llx\n", tmp3())
+        PUSH-FRAME(0, all-good-label)
         jmp(a, CONST(tmp1(), extend-stack-launch-value))
         bind(a, all-good-label)
         false
@@ -795,7 +821,8 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, rax())
       CONV-OPCODE-LONG-INT : ;YYY
         println("B CONV-LONG-INT X %_ VALUE %_" % [x, value])
-        mov(a, rax(), LOCAL(tmp1i(), value))
+        debug(a, "CONV-LONG-INT\n")
+        mov(a, rax(), LOCAL(tmp1(), value))
         SET-LOCAL(x, rax())
       CONV-OPCODE-LONG-FLOAT : ;YYY
         println("B CONV-LONG-FLOAT")
@@ -1291,6 +1318,7 @@ public defn encode (fid:Int, func:VMFunction,
       MUL-OPCODE-LONG : ;YYY
         println("C MUL-LONG X %_ Y %_ VALUE %_" % [x, y, value])
         imul(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
+        debug(a, "MUL-LONG %llx %llx\n", tmp1(), tmp2())
         SET-LOCAL(x, tmp1())
       MUL-OPCODE-FLOAT : ;YYY
         println("C MUL-FLOAT")
@@ -1526,15 +1554,15 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, res)
       UGE-OPCODE-BYTE : ;YYY
         println("C UGE-BYTE")
-        val res = cmp-set(a, LOCAL(tmp1b(), y), LOCAL(tmp2b(), value), tmp3(), tmp3b(), set-be)
+        val res = cmp-set(a, LOCAL(tmp1b(), y), LOCAL(tmp2b(), value), tmp3(), tmp3b(), set-ae)
         SET-LOCAL(x, res)
       UGE-OPCODE-INT : ;YYY
         println("C UGE-INT")
-        val res = cmp-set(a, LOCAL(tmp1i(), y), LOCAL(tmp2i(), value), tmp3(), tmp3b(), set-be)
+        val res = cmp-set(a, LOCAL(tmp1i(), y), LOCAL(tmp2i(), value), tmp3(), tmp3b(), set-ae)
         SET-LOCAL(x, res)
       UGE-OPCODE-LONG : ;YYY
         println("C UGE-LONG")
-        val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-be)
+        val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-ae)
         SET-LOCAL(x, res)
       ALLOC-OPCODE-LOCAL : ;YYY
         println("C ALLOC-LOCAL X %_ Y %_ VALUE %_" % [x, y, value])
@@ -1605,22 +1633,21 @@ public defn encode (fid:Int, func:VMFunction,
         mov(a, MemPtr(LOCAL(tmp1(), x), CONST(tmp2(), value), 0, 0, SIZEOF-LONG), LOCAL(rax(), z))
       STORE-OPCODE-1-VAR-OFFSET : ;YYY
         println("E STORE-1-VAR-OFFSET")
-        add(a, LOCAL(tmp2(), y), CONST(tmp1(), value))
-        mov(a, MemPtr(LOCAL(tmp1(), x), tmp2(), 0, 0, SIZEOF-BYTE), LOCAL(al(), z))
+        mov(a, MemPtr(LOCAL(tmp1(), x), LOCAL(tmp2(), y), 0, value, SIZEOF-BYTE), LOCAL(al(), z))
       STORE-OPCODE-4-VAR-OFFSET : ;YYY
         println("E STORE-4-VAR-OFFSET")
-        add(a, LOCAL(tmp2(), y), CONST(tmp1(), value))
-        mov(a, MemPtr(LOCAL(tmp1(), x), tmp2(), 0, 0, SIZEOF-INT), LOCAL(eax(), z))
+        mov(a, MemPtr(LOCAL(tmp1(), x), LOCAL(tmp2(), y), 0, value, SIZEOF-INT), LOCAL(eax(), z))
+        debug(a, "STORE-4-VAR-OFFSET %llx %llx\n", tmp1(), tmp2())
       STORE-OPCODE-8-VAR-OFFSET : ;YYY
         println("E STORE-8-VAR-OFFSET")
-        add(a, LOCAL(tmp2(), y), CONST(tmp1(), value))
-        mov(a, MemPtr(LOCAL(tmp1(), x), tmp2(), 0, 0, SIZEOF-LONG), LOCAL(rax(), z))
+        mov(a, MemPtr(LOCAL(tmp1(), x), LOCAL(tmp2(), y), 0, value, SIZEOF-LONG), LOCAL(rax(), z))
       LOAD-OPCODE-1 :  ;YYY
         println("D LOAD-1")
         mov(a, tmp2(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-BYTE))
         SET-LOCAL(x, tmp2())
       LOAD-OPCODE-4 :  ;YYY
         println("D LOAD-4")
+        debug(a, "LOAD-4 %llx %llx\n", LOCAL(tmp1(), y), CONST(tmp2(), value))
         mov(a, tmp2(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-INT))
         SET-LOCAL(x, tmp2())
       LOAD-OPCODE-8 : ;YYY
@@ -1630,19 +1657,17 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, tmp2())
       LOAD-OPCODE-1-VAR-OFFSET : ;YYY
         println("E LOAD-1-VAR-OFFSET")
-        add(a, LOCAL(tmp2(), y), CONST(tmp1(), value))
-        mov(a, tmp2(), MemPtr(LOCAL(tmp1(), y), tmp2(), 0, 0, SIZEOF-BYTE))
-        SET-LOCAL(x, tmp2())
+        mov(a, tmp3(), MemPtr(LOCAL(tmp2(), y), LOCAL(tmp1(), z), 0, value, SIZEOF-BYTE))
+        SET-LOCAL(x, tmp3())
       LOAD-OPCODE-4-VAR-OFFSET : ;YYY
-        println("E LOAD-4-VAR-OFFSET")
-        add(a, LOCAL(tmp2(), y), CONST(tmp1(), value))
-        mov(a, tmp2(), MemPtr(LOCAL(tmp1(), y), tmp2(), 0, 0, SIZEOF-INT))
-        SET-LOCAL(x, tmp2())
+        println("E LOAD-4-VAR-OFFSET X %_ Y %_ Z %_ VALUE %_" % [x, y, z, value])
+        mov(a, tmp3(), MemPtr(LOCAL(tmp2(), y), LOCAL(tmp1(), z), 0, value, SIZEOF-INT))
+        debug(a, "LOAD-4-VAR-OFFSET %llx %llx\n", tmp2(), tmp1())
+        SET-LOCAL(x, tmp3())
       LOAD-OPCODE-8-VAR-OFFSET : ;YYY
         println("E LOAD-8-VAR-OFFSET")
-        add(a, LOCAL(tmp2(), y), CONST(tmp1(), value))
-        mov(a, tmp2(), MemPtr(LOCAL(tmp1(), y), tmp2(), 0, 0, SIZEOF-LONG))
-        SET-LOCAL(x, tmp2())
+        mov(a, tmp3(), MemPtr(LOCAL(tmp2(), y), LOCAL(tmp1(), z), 0, value, SIZEOF-LONG))
+        SET-LOCAL(x, tmp3())
       else :
         println("MISSING E OPCODE %_" % [opcode])
 
