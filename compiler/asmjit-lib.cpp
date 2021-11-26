@@ -92,6 +92,9 @@ void assembler_jbe(Assembler *a, Label *label) {
 void assembler_and_reg(Assembler *a, const Gp *dst, const Gp *src) {
   a->and_(*dst, *src);
 }
+void assembler_and_int(Assembler *a, const Gp *dst, int src) {
+  a->and_(*dst, src);
+}
 void assembler_or_reg(Assembler *a, const Gp *dst, const Gp *src) {
   a->or_(*dst, *src);
 }

@@ -59,6 +59,7 @@ extern "C" {
   void assembler_add_int(Assembler *a, const Gp *dst, int);
   void assembler_sub_reg(Assembler *a, const Gp *dst, const Gp *src);
   void assembler_and_reg(Assembler *a, const Gp *dst, const Gp *src);
+  void assembler_and_int(Assembler *a, const Gp *dst, int src);
   void assembler_or_reg(Assembler *a, const Gp *dst, const Gp *src);
   void assembler_xor_reg(Assembler *a, const Gp *dst, const Gp *src);
   void assembler_not_reg(Assembler *a, const Gp *dst);

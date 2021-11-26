@@ -49,6 +49,7 @@ extern assembler_imul_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_div_reg: (ptr<?>, ptr<?>) -> int
 extern assembler_mod_reg: (ptr<?>, ptr<?>) -> int
 extern assembler_and_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_and_int: (ptr<?>, ptr<?>, int) -> int
 extern assembler_or_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_xor_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_not_reg: (ptr<?>, ptr<?>) -> int
@@ -297,6 +298,9 @@ public lostanza defn mod (a:ref<Assembler>, divisor:ref<Gp>) -> ref<False> :
   return false
 public lostanza defn and-op (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
   call-c assembler_and_reg(a.value, dst.value, src.value)
+  return false
+public lostanza defn and-op (a:ref<Assembler>, dst:ref<Gp>, src:ref<Int>) -> ref<False> :
+  call-c assembler_and_int(a.value, dst.value, src.value)
   return false
 public lostanza defn or-op (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<False> :
   call-c assembler_or_reg(a.value, dst.value, src.value)

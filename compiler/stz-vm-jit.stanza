@@ -509,6 +509,7 @@ public defn encode (fid:Int, func:VMFunction,
     ; stack_pointer->slots[l] = v;
     false
   defn SET-LOCAL-INT (l:Int, v:Gp) :
+    ;COULD MERGE ABOVE WITH THIS
     movsx(a, v, v)
     SET-LOCAL(l, v)
   defn SET-LOCAL-FLOAT (l:Int,v:Xmm) :
@@ -517,6 +518,7 @@ public defn encode (fid:Int, func:VMFunction,
     ; mov(a, MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG), tmp1())
     ; movss(a, MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG), v)
     movsd(a, MemPtr(stack-frame-slots(rbx()), CONST(rsi(), l), 3, 0, SIZEOF-LONG), v)
+    debug(a, "SET-LOCAL-FLOAT[%d] %llx\n", CONST(rbx(), l), LOCAL(tmp1(), l))
     ; float* addr = (float*)&(stack_pointer->slots[l])
     ; *addr = v
     false
@@ -801,12 +803,14 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, tmp1b())
       CONV-OPCODE-BYTE-DOUBLE : ;YYY
         println("B CONV-BYTE-DOUBLE")
-        cvtss2si(a, tmp1b(), LOCAL-DOUBLE(xmm0(), value))
-        SET-LOCAL(x, tmp1b())
+        cvtsd2si(a, tmp1(), LOCAL-DOUBLE(xmm0(), value))
+        and-op(a, tmp1(), 0xff)
+        SET-LOCAL(x, tmp1())
       CONV-OPCODE-INT-BYTE : ;YYY
         println("B CONV-INT-BYTE")
+        xor-op(a, tmp1(), tmp1())
         mov(a, tmp1i(), LOCAL(tmp1b(), value))
-        SET-LOCAL(x, tmp1i())
+        SET-LOCAL(x, tmp1())
       CONV-OPCODE-INT-FLOAT : ;YYY
         println("B CONV-INT-FLOAT")
         cvtss2si(a, tmp1i(), LOCAL-FLOAT(xmm0(), value))
@@ -817,13 +821,14 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, tmp1i())
       CONV-OPCODE-LONG-BYTE : ;YYY
         println("B CONV-LONG-BYTE")
-        mov(a, rax(), LOCAL(tmp1b(), value))
-        SET-LOCAL(x, rax())
+        and-op(a, LOCAL(tmp1(), value), 0xff)
+        SET-LOCAL(x, tmp1())
+        debug(a, "CONV-LONG-BYTE %llx %llx\n", tmp1(), LOCAL(tmp2(), x))
       CONV-OPCODE-LONG-INT : ;YYY
         println("B CONV-LONG-INT X %_ VALUE %_" % [x, value])
-        debug(a, "CONV-LONG-INT\n")
-        mov(a, rax(), LOCAL(tmp1(), value))
+        movsx(a, rax(), LOCAL(tmp1i(), value))
         SET-LOCAL(x, rax())
+        debug(a, "CONV-LONG-INT %llx %llx\n" tmp1(), rax())
       CONV-OPCODE-LONG-FLOAT : ;YYY
         println("B CONV-LONG-FLOAT")
         cvtss2si(a, rax(), LOCAL-FLOAT(xmm0(), value))
@@ -846,14 +851,16 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL-FLOAT(x, xmm0())
       CONV-OPCODE-FLOAT-DOUBLE : ;YYY
         println("B CONV-FLOAT-DOUBLE")
-        SET-LOCAL-FLOAT(x, LOCAL-DOUBLE(xmm0(), value))
+        cvtsd2ss(a, xmm1(), LOCAL-DOUBLE(xmm0(), value))
+        SET-LOCAL-FLOAT(x, xmm1())
       CONV-OPCODE-DOUBLE-BYTE : ;YYY
         println("B CONV-DOUBLE-BYTE")
-        mov(a, xmm0(), LOCAL(tmp1b(), value))
+        cvtsi2sd(a, xmm0(), LOCAL(tmp1(), value))
         SET-LOCAL-DOUBLE(x, xmm0())
+        debug(a, "CONV-DOUBLE-BYTE %llx %llx\n" LOCAL(tmp1(), value), LOCAL(tmp2(), x))
       CONV-OPCODE-DOUBLE-INT : ;YYY
         println("B CONV-DOUBLE-INT")
-        cvtsi2sd(a, xmm0(), LOCAL(tmp1i(), value))
+        cvtsi2sd(a, xmm0(), LOCAL(tmp1(), value))
         SET-LOCAL-DOUBLE(x, xmm0())
       CONV-OPCODE-DOUBLE-LONG : ;YYY
         println("B CONV-DOUBLE-LONG")
@@ -1459,11 +1466,13 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, res)
       LT-OPCODE-FLOAT : ;YYY
         println("C LT-FLOAT")
-        val res = cmpf-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-l)
+        val res = cmpf-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-b)
+        debug(a, "LT-FLOAT %d\n", res)
         SET-LOCAL(x, res)
       LT-OPCODE-DOUBLE : ;YYY
         println("C LT-DOUBLE")
-        val res = cmpd-set(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value), tmp3(), tmp3b(), set-l)
+        val res = cmpd-set(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value), tmp3(), tmp3b(), set-b)
+        debug(a, "LT-DOUBLE %d\n", res)
         SET-LOCAL(x, res)
       GT-OPCODE-INT : ;YYY
         println("C GT-INT")
@@ -1476,11 +1485,13 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, res)
       GT-OPCODE-FLOAT : ;YYY
         println("C GT-FLOAT")
-        val res = cmpf-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-g)
+        val res = cmpf-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-a)
+        debug(a, "GT-FLOAT %d\n" res)
         SET-LOCAL(x, res)
       GT-OPCODE-DOUBLE : ;YYY
         println("C GT-DOUBLE")
-        val res = cmpd-set(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value), tmp3(), tmp3b(), set-g)
+        val res = cmpd-set(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value), tmp3(), tmp3b(), set-a)
+        debug(a, "GT-DOUBLE %d\n", res)
         SET-LOCAL(x, res)
       LE-OPCODE-INT : ;YYY
         println("C LE-INT")
@@ -1493,11 +1504,13 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, res)
       LE-OPCODE-FLOAT : ;YYY
         println("C LE-FLOAT")
-        val res = cmpf-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-le)
+        val res = cmpf-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-be)
+        debug(a, "LE-FLOAT %d\n" res)
         SET-LOCAL(x, res)
       LE-OPCODE-DOUBLE : ;YYY
         println("C LE-DOUBLE")
-        val res = cmpd-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-le)
+        val res = cmpd-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-be)
+        debug(a, "LE-DOUBLE %d\n", res)
         SET-LOCAL(x, res)
       GE-OPCODE-INT : ;YYY
         println("C GE-INT")
@@ -1510,11 +1523,13 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, res)
       GE-OPCODE-FLOAT : ;YYY
         println("C GE-FLOAT")
-        val res = cmpf-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-ge)
+        val res = cmpf-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-ae)
+        debug(a, "GE-FLOAT %d\n" res)
         SET-LOCAL(x, res)
       GE-OPCODE-DOUBLE : ;YYY
         println("C GE-DOUBLE")
-        val res = cmpd-set(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value), tmp3(), tmp3b(), set-ge)
+        val res = cmpd-set(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value), tmp3(), tmp3b(), set-ae)
+        debug(a, "GE-DOUBLE %d\n", res)
         SET-LOCAL(x, res)
       ULT-OPCODE-BYTE : ;YYY
         println("C ULT-BYTE")
@@ -1617,12 +1632,18 @@ public defn encode (fid:Int, func:VMFunction,
   defn emit-ins-e (opcode:Int, x:Int, y:Int, z:Int, value:Int) :
     switch(opcode) :
       STORE-OPCODE-1 : ;YYY
-        println("E STORE-1")
-        debug(a, "STORE-1\n")
+        println("E STORE-1 X %_ VALUE %_ Z %_" % [x, value, z])
+        LOCAL(tmp1(), x), CONST(tmp2(), value)
+        debug(a, "STORE-1 %llx %d: " tmp1() tmp2())
+        LOCAL(tmp1(), z)
+        debug(a, "%llx\n" tmp1())
         mov(a, MemPtr(LOCAL(tmp1(), x), CONST(tmp2(), value), 0, 0, SIZEOF-BYTE), LOCAL(al(), z))
       STORE-OPCODE-4 : ;YYY
-        println("E STORE-4")
-        debug(a, "STORE-4\n")
+        println("E STORE-4 X %_ VALUE %_ Z %_" % [x, value, z])
+        LOCAL(tmp1(), x), CONST(tmp2(), value)
+        debug(a, "STORE-4 %llx %d: " tmp1() tmp2())
+        LOCAL(tmp1i(), z)
+        debug(a, "%llx\n" tmp1())
         mov(a, MemPtr(LOCAL(tmp1(), x), CONST(tmp2(), value), 0, 0, SIZEOF-INT), LOCAL(eax(), z))
       STORE-OPCODE-8 : ;YYY
         println("E STORE-8 X %_ VALUE %_ Z %_" % [x, value, z])
@@ -1642,11 +1663,13 @@ public defn encode (fid:Int, func:VMFunction,
         println("E STORE-8-VAR-OFFSET")
         mov(a, MemPtr(LOCAL(tmp1(), x), LOCAL(tmp2(), y), 0, value, SIZEOF-LONG), LOCAL(rax(), z))
       LOAD-OPCODE-1 :  ;YYY
-        println("D LOAD-1")
-        mov(a, tmp2(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-BYTE))
-        SET-LOCAL(x, tmp2())
+        println("D LOAD-1 X %_ Y %_ VALUE %_" % [x, y, value])
+        mov(a, tmp3(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-BYTE))
+        debug(a, "LOAD-1 %llx %llx: ", LOCAL(tmp1(), y), CONST(tmp2(), value))
+        debug(a, "%llx\n", tmp3())
+        SET-LOCAL(x, tmp3())
       LOAD-OPCODE-4 :  ;YYY
-        println("D LOAD-4")
+        println("D LOAD-4 X %_ Y %_ VALUE %_" % [x, y, value])
         debug(a, "LOAD-4 %llx %llx\n", LOCAL(tmp1(), y), CONST(tmp2(), value))
         mov(a, tmp2(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-INT))
         SET-LOCAL(x, tmp2())
