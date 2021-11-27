@@ -424,6 +424,9 @@ defn compute-stack-limit (a:Assembler) -> Gp :
   add(a, rax(), tmp1())
   rax()
 
+val covered = IntSet()
+public defn opcode-coverage () -> IntSet : covered
+
 public defn encode (fid:Int, func:VMFunction,
                     rt:JitRuntime,
                     resolver:EncodingResolver,
@@ -504,11 +507,21 @@ public defn encode (fid:Int, func:VMFunction,
     false
   defn SET-LOCAL (l:Int, v:Gp) :
     ; debug(a, "SET-LOCAL SLOTS %llx\n" stack-frame-slots())
-    mov(a, MemPtr(stack-frame-slots(rbx()), CONST(rsi(), l), 3, 0, SIZEOF-LONG), v)
+    ; mov(a, MemPtr(stack-frame-slots(rbx()), CONST(rsi(), l), 3, 0, SIZEOF-LONG), v)
+    mov(a, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG), v)
     debug(a, "SET-LOCAL[%d] %llx\n", CONST(rbx(), l), v)
     ; stack_pointer->slots[l] = v;
     false
+  defn SET-LOCAL-BYTE (l:Int, v:Gp) :
+    ;COULD MERGE ABOVE WITH THIS
+    and-op(a, v, 0xff)
+    SET-LOCAL(l, v)
   defn SET-LOCAL-INT (l:Int, v:Gp) :
+    ;COULD MERGE ABOVE WITH THIS
+    movsx(a, v, v)
+    ; and-op(a, v, 0xffffffff)
+    SET-LOCAL(l, v)
+  defn SET-LOCAL-INT-EXT (l:Int, v:Gp) :
     ;COULD MERGE ABOVE WITH THIS
     movsx(a, v, v)
     SET-LOCAL(l, v)
@@ -517,7 +530,7 @@ public defn encode (fid:Int, func:VMFunction,
     ; debug(a, "SET-LOCAL-FLOAT %llx\n", tmp1())
     ; mov(a, MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG), tmp1())
     ; movss(a, MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG), v)
-    movsd(a, MemPtr(stack-frame-slots(rbx()), CONST(rsi(), l), 3, 0, SIZEOF-LONG), v)
+    movsd(a, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG), v)
     debug(a, "SET-LOCAL-FLOAT[%d] %llx\n", CONST(rbx(), l), LOCAL(tmp1(), l))
     ; float* addr = (float*)&(stack_pointer->slots[l])
     ; *addr = v
@@ -526,18 +539,19 @@ public defn encode (fid:Int, func:VMFunction,
     ; mov(a, tmp1(), v)
     ; debug(a, "SET-LOCAL-DOUBLE %llx\n", tmp1())
     ; mov(a, MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG), tmp1())
-    movsd(a, MemPtr(stack-frame-slots(rbx()), CONST(rsi(), l), 3, 0, SIZEOF-LONG), v)
+    movsd(a, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG), v)
     ; double* addr = (double*)&(stack_pointer->slots[l])
     ; *addr = v
     false
 
   defn LOCAL (dst:Gp, l:Int) -> Gp :
-    mov(a, dst, MemPtr(stack-frame-slots(rbx()), CONST(rsi(), l), 3, 0, SIZEOF-LONG)) 
+    ; mov(a, dst, MemPtr(stack-frame-slots(rbx()), CONST(rsi(), l), 3, 0, SIZEOF-LONG)) 
+    mov(a, dst, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG)) 
     dst
   defn LOCAL (l:Int) -> Gp : LOCAL(rax(), l)
    ; stack_pointer->slots[l]
   defn LOCAL-FLOAT (dst:Xmm, l:Int) -> Xmm :
-    movss(a, dst, MemPtr(stack-frame-slots(rbx()), CONST(rsi(), l), 3, 0, SIZEOF-INT))
+    movss(a, dst, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-INT))
     ; mov(a, tmp1(), MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG))
     ; debug(a, "LOCAL-FLOAT %llx\n" tmp1())
     ; mov(a, dst, tmp1()) 
@@ -550,7 +564,7 @@ public defn encode (fid:Int, func:VMFunction,
   defn LOCAL-FLOAT (l:Int) -> Xmm :
     LOCAL-FLOAT(xmm0(), l)
   defn LOCAL-DOUBLE (dst:Xmm, l:Int) -> Xmm :
-    movsd(a, dst, MemPtr(stack-frame-slots(rbx()), CONST(rsi(), l), 3, 0, SIZEOF-INT))
+    movsd(a, dst, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG))
     ; mov(a, tmp1(), MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG))
     ; mov(a, dst, tmp1()) 
     dst
@@ -622,6 +636,7 @@ public defn encode (fid:Int, func:VMFunction,
     bind(a, end-label)
 
   defn emit-ins-a (opcode:Int, value:Label) :
+    add(covered, opcode)
     switch(opcode) :
       GOTO-OPCODE : 
         println("A GOTO")
@@ -629,6 +644,7 @@ public defn encode (fid:Int, func:VMFunction,
         jmp(a, value as Label)
 
   defn emit-ins-a (opcode:Int, value:Int) :
+    add(covered, opcode)
     switch(opcode) :
       FNENTRY-OPCODE : ;YYY
         println("A FNENTRY")
@@ -754,6 +770,7 @@ public defn encode (fid:Int, func:VMFunction,
     dst
 
   defn emit-ins-b (opcode:Int, x:Int, value:Int) :
+    add(covered, opcode)
     switch(opcode) :
       INT-NOT-OPCODE : ;YYY
         println("B INT-NOT")
@@ -767,20 +784,23 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, tmp1())
       NOT-OPCODE-BYTE : ;YYY
         println("B NOT-BYTE")
+        xor-op(a, tmp1(), tmp1())
         not-op(a, LOCAL(tmp1b(), value))
-        SET-LOCAL(x, tmp1b())
+        SET-LOCAL-BYTE(x, tmp1())
       NOT-OPCODE-INT : ;YYY
         println("B NOT-INT")
+        xor-op(a, tmp1(), tmp1())
         not-op(a, LOCAL(tmp1i(), value))
-        SET-LOCAL(x, tmp1i())
+        SET-LOCAL-INT(x, tmp1())
+        debug(a, "NOT-INT %llx %llx\n", tmp1(), LOCAL(tmp2(), x))
       NOT-OPCODE-LONG : ;YYY
         println("B NOT-LONG")
         not-op(a, LOCAL(rax(), value))
         SET-LOCAL(x, rax())
       NEG-OPCODE-INT : ;YYY
         println("B NEG-INT")
-        neg(a, LOCAL(tmp1i(), value))
-        SET-LOCAL-INT(x, tmp1())
+        neg(a, LOCAL(tmp1(), value))
+        SET-LOCAL-INT-EXT(x, tmp1())
       NEG-OPCODE-LONG : ;YYY
         println("B NEG-LONG")
         neg(a, LOCAL(rax(), value))
@@ -922,6 +942,7 @@ public defn encode (fid:Int, func:VMFunction,
         println("MISSING B OPCODE %_" % [opcode])
 
   defn emit-ins-c (opcode:Int, x:Int, value:Int) :
+    add(covered, opcode)
     switch(opcode) :
       TCALL-OPCODE-LOCAL : ;YYY
         println("C TCALL-LOCAL")
@@ -1048,6 +1069,7 @@ public defn encode (fid:Int, func:VMFunction,
         println("MISSING C OPCODE %_" % [opcode])
 
   defn emit-ins-c (opcode:Int, x:Label, y:Int, value:Int) :
+    add(covered, opcode)
     defn do-reserve (size:Gp, num-locals:Int) :
       debug(a, "RESERVE SIZE %llx LIMIT %llx\n", size, heap-limit())
       mov(a, tmp2(), heap-top())
@@ -1079,6 +1101,7 @@ public defn encode (fid:Int, func:VMFunction,
         do-reserve(CONST(rbx(), value), y)
 
   defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Label) :
+    add(covered, opcode)
     switch(opcode) :
       JUMP-REG-OPCODE : ;YYY
         val reg = x
@@ -1106,6 +1129,7 @@ public defn encode (fid:Int, func:VMFunction,
     z
 
   defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Int) :
+    add(covered, opcode)
     switch(opcode) :
       INT-ADD-OPCODE :
         println("C INT-ADD")
@@ -1136,7 +1160,6 @@ public defn encode (fid:Int, func:VMFunction,
         xor-op(a, rdx(), rdx())
         LOCAL(rax(), y), 
         div(a, LOCAL(tmp2(), value))
-        shl(a, rdx(), 32)
         debug(a, "INT-MOD %llx\n" rdx())
         SET-LOCAL(x, rdx())
       INT-AND-OPCODE : ;YYY
@@ -1268,12 +1291,12 @@ public defn encode (fid:Int, func:VMFunction,
         println("C ADD-BYTE")
         add(a, LOCAL(tmp1b(), y), LOCAL(tmp2b(), value))
         debug(a, "ADD-BYTE %llx\n" tmp1b())
-        SET-LOCAL(x, tmp1())
+        SET-LOCAL-BYTE(x, tmp1())
       ADD-OPCODE-INT : ;YYY
         println("C ADD-INT")
         add(a, LOCAL(tmp1i(), y), LOCAL(tmp2i(), value))
         debug(a, "ADD-INT %llx\n" tmp1i())
-        SET-LOCAL(x, tmp1())
+        SET-LOCAL-INT-EXT(x, tmp1())
       ADD-OPCODE-LONG : ;YYY
         println("C ADD-LONG X %_ Y %_ VALUE %_" % [x, y, value])
         add(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
@@ -1295,12 +1318,12 @@ public defn encode (fid:Int, func:VMFunction,
       SUB-OPCODE-BYTE : ;YYY
         println("C SUB-BYTE")
         sub(a, LOCAL(tmp1b(), y), LOCAL(tmp2b(), value))
-        SET-LOCAL(x, tmp1())
+        SET-LOCAL-BYTE(x, tmp1())
       SUB-OPCODE-INT : ;YYY
         println("C SUB-INT")
         sub(a, LOCAL(tmp1i(), y), LOCAL(tmp2i(), value))
         debug(a, "SUB-INT %llx\n" tmp1i())
-        SET-LOCAL-INT(x, tmp1())
+        SET-LOCAL-INT-EXT(x, tmp1())
       SUB-OPCODE-LONG : ;YYY
         println("C SUB-LONG")
         sub(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
@@ -1315,13 +1338,14 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL-DOUBLE(x, xmm0())
       MUL-OPCODE-BYTE : ;YYY
         println("C MUL-BYTE")
-        imul(a, LOCAL(tmp1b(), y), LOCAL(tmp2b(), value))
-        SET-LOCAL(x, tmp1b())
+        imul(a, LOCAL(tmp1i(), y), LOCAL(tmp2i(), value))
+        SET-LOCAL-BYTE(x, tmp1())
+        debug(a, "MUL-BYTE %llx %llx\n" tmp2(), tmp1())
       MUL-OPCODE-INT : ;YYY
         println("C MUL-INT")
         imul(a, LOCAL(tmp1i(), y), LOCAL(tmp2i(), value))
         debug(a, "MUL-INT %llx\n" tmp1i())
-        SET-LOCAL-INT(x, tmp1())
+        SET-LOCAL-INT-EXT(x, tmp1())
       MUL-OPCODE-LONG : ;YYY
         println("C MUL-LONG X %_ Y %_ VALUE %_" % [x, y, value])
         imul(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
@@ -1338,16 +1362,16 @@ public defn encode (fid:Int, func:VMFunction,
       DIV-OPCODE-BYTE : ;YYY
         println("C DIV-BYTE")
         xor-op(a, rdx(), rdx())
-        LOCAL(al(), y), 
-        div(a, LOCAL(tmp2b(), value))
-        SET-LOCAL(x, al())
+        LOCAL(rax(), y), 
+        div(a, LOCAL(tmp2(), value))
+        SET-LOCAL-BYTE(x, rax())
       DIV-OPCODE-INT : ;YYY
         println("C DIV-INT")
         xor-op(a, rdx(), rdx())
-        LOCAL(eax(), y), 
-        div(a, LOCAL(tmp2i(), value))
-        debug(a, "DIV-INT %llx\n" eax())
-        SET-LOCAL-INT(x, rax())
+        LOCAL(rax(), y), 
+        div(a, LOCAL(tmp2(), value))
+        debug(a, "DIV-INT %llx\n" rax())
+        SET-LOCAL-INT-EXT(x, rax())
       DIV-OPCODE-LONG : ;YYY
         println("C DIV-LONG")
         xor-op(a, rdx(), rdx())
@@ -1366,13 +1390,14 @@ public defn encode (fid:Int, func:VMFunction,
         println("C MOD-BYTE")
         xor-op(a, rdx(), rdx())
         LOCAL(rax(), y)
-        div(a, LOCAL(tmp2b(), value))
-        SET-LOCAL(x, rdx())
+        div(a, LOCAL(tmp2(), value))
+        debug(a, "MOD-BYTE %llx %llx\n" rdx(), rax())
+        SET-LOCAL-BYTE(x, rdx())
       MOD-OPCODE-INT : ;YYY
         println("C MOD-INT")
         xor-op(a, rdx(), rdx())
         LOCAL(rax(), y)
-        div(a, LOCAL(tmp2i(), value))
+        div(a, LOCAL(tmp2(), value))
         debug(a, "MOD-INT %llx\n" edx())
         SET-LOCAL-INT(x, rdx())
       MOD-OPCODE-LONG : ;YYY
@@ -1384,7 +1409,7 @@ public defn encode (fid:Int, func:VMFunction,
       AND-OPCODE-BYTE : ;YYY
         println("C AND-BYTE")
         and-op(a, LOCAL(tmp1b(), y), LOCAL(tmp2b(), value))
-        SET-LOCAL(x, tmp1b())
+        SET-LOCAL-BYTE(x, tmp1())
       AND-OPCODE-INT : ;YYY
         println("C AND-INT")
         and-op(a, LOCAL(tmp1i(), y), LOCAL(tmp2i(), value))
@@ -1397,7 +1422,7 @@ public defn encode (fid:Int, func:VMFunction,
       OR-OPCODE-BYTE : ;YYY
         println("C OR-BYTE")
         or-op(a, LOCAL(tmp1b(), y), LOCAL(tmp2b(), value))
-        SET-LOCAL(x, tmp1b())
+        SET-LOCAL-BYTE(x, tmp1())
       OR-OPCODE-INT : ;YYY
         println("C OR-INT")
         or-op(a, LOCAL(tmp1i(), y), LOCAL(tmp2i(), value))
@@ -1411,11 +1436,11 @@ public defn encode (fid:Int, func:VMFunction,
         println("C XOR-BYTE")
         xor-op(a, LOCAL(tmp1b(), y), LOCAL(tmp2b(), value))
         debug(a, "XOR-INT %llx\n" tmp1i())
-        SET-LOCAL(x, tmp1b())
+        SET-LOCAL-BYTE(x, tmp1())
       XOR-OPCODE-INT : ;YYY
         println("C XOR-INT")
         xor-op(a, LOCAL(tmp1i(), y), LOCAL(tmp2i(), value))
-        SET-LOCAL(x, tmp1i())
+        SET-LOCAL-INT(x, tmp1i())
       XOR-OPCODE-LONG : ;YYY
         println("C XOR-LONG")
         xor-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
@@ -1423,12 +1448,12 @@ public defn encode (fid:Int, func:VMFunction,
       SHL-OPCODE-BYTE : ;YYY
         println("C SHL-BYTE")
         shl(a, LOCAL(tmp1b(), y), LOCAL(rcx(), value))
-        SET-LOCAL(x, tmp1b())
+        SET-LOCAL-BYTE(x, tmp1())
       SHL-OPCODE-INT : ;YYY
         println("C SHL-INT")
         shl(a, LOCAL(tmp1i(), y), LOCAL(rcx(), value))
         debug(a, "SHL-INT %llx\n" tmp1())
-        SET-LOCAL(x, tmp1())
+        SET-LOCAL-INT(x, tmp1())
       SHL-OPCODE-LONG : ;YYY
         println("C SHL-LONG")
         shl(a, LOCAL(tmp1(), y), LOCAL(rcx(), value))
@@ -1436,12 +1461,12 @@ public defn encode (fid:Int, func:VMFunction,
       SHR-OPCODE-BYTE : ;YYY
         println("C SHR-BYTE")
         shr(a, LOCAL(tmp1b(), y), LOCAL(rcx(), value))
-        SET-LOCAL(x, tmp1b())
+        SET-LOCAL-BYTE(x, tmp1())
       SHR-OPCODE-INT : ;YYY
         println("C SHR-INT")
         shr(a, LOCAL(tmp1i(), y), LOCAL(rcx(), value))
         debug(a, "SHR-INT %llx\n" tmp1i())
-        SET-LOCAL(x, tmp1i())
+        SET-LOCAL-INT(x, tmp1i())
       SHR-OPCODE-LONG : ;YYY
         println("C SHR-LONG")
         shr(a, LOCAL(tmp1(), y), LOCAL(rcx(), value))
@@ -1450,7 +1475,7 @@ public defn encode (fid:Int, func:VMFunction,
         println("C ASHR-INT")
         ashr(a, LOCAL(tmp1(), y), LOCAL(rcx(), value))
         debug(a, "ASHR-INT %llx\n" tmp1i())
-        SET-LOCAL(x, tmp1())
+        SET-LOCAL-INT-EXT(x, tmp1())
       ASHR-OPCODE-LONG : ;YYY
         println("C ASHR-LONG")
         ashr(a, LOCAL(tmp1(), y), LOCAL(rcx(), value))
@@ -1602,6 +1627,7 @@ public defn encode (fid:Int, func:VMFunction,
         println("MISSING C OPCODE %_" % [opcode])
 
   defn emit-ins-d (opcode:Int, x:Int, value:Long) :
+    add(covered, opcode)
     switch(opcode) :
       CALLC-OPCODE-WIDE :  ;YYY
         println("D CALLC-WIDE")
@@ -1630,6 +1656,7 @@ public defn encode (fid:Int, func:VMFunction,
         println("MISSING D OPCODE %_" % [opcode])
 
   defn emit-ins-e (opcode:Int, x:Int, y:Int, z:Int, value:Int) :
+    add(covered, opcode)
     switch(opcode) :
       STORE-OPCODE-1 : ;YYY
         println("E STORE-1 X %_ VALUE %_ Z %_" % [x, value, z])
@@ -1714,6 +1741,7 @@ public defn encode (fid:Int, func:VMFunction,
     jump-op-xmm(LOCAL-DOUBLE(xmm0(), x), LOCAL-DOUBLE(xmm1(), y), f, ucomisd, n1, n2)
     
   defn emit-ins-f (opcode:Int, x:Int, y:Int, n1:Label, n2:Label) :
+    add(covered, opcode)
     switch(opcode) :
       JUMP-TAGBITS-OPCODE :
         println("F JUMP-TAGBITS")
@@ -1804,10 +1832,10 @@ public defn encode (fid:Int, func:VMFunction,
         jump-op(x, y, jl, cmp, n1, n2)
       JUMP-LT-OPCODE-FLOAT : ;YYY
         println("F JUMP-LT-FLOAT")
-        jump-float-op(x, y, jl, n1, n2)
+        jump-float-op(x, y, jb, n1, n2)
       JUMP-LT-OPCODE-DOUBLE : ;YYY
         println("F JUMP-LT-DOUBLE")
-        jump-double-op(x, y, jl, n1, n2)
+        jump-double-op(x, y, jb, n1, n2)
       JUMP-GT-OPCODE-INT : ;YYY
         println("F JUMP-GT-INT")
         debug(a, "JUMP-GT-INT %llx %llx\n" LOCAL(tmp1i(), x), LOCAL(tmp2i(), y))
@@ -1818,10 +1846,10 @@ public defn encode (fid:Int, func:VMFunction,
         jump-op(x, y, jg, cmp, n1, n2)
       JUMP-GT-OPCODE-FLOAT : ;YYY
         println("F JUMP-GT-FLOAT")
-        jump-float-op(x, y, jg, n1, n2)
+        jump-float-op(x, y, ja, n1, n2)
       JUMP-GT-OPCODE-DOUBLE : ;YYY
         println("F JUMP-GT-DOUBLE")
-        jump-double-op(x, y, jg, n1, n2)
+        jump-double-op(x, y, ja, n1, n2)
       JUMP-LE-OPCODE-INT : ;YYY
         println("F JUMP-LE-INT")
         debug(a, "JUMP-LE-INT %llx %llx\n" LOCAL(tmp1i(), x), LOCAL(tmp2i(), y))
@@ -1832,10 +1860,10 @@ public defn encode (fid:Int, func:VMFunction,
         jump-op(x, y, jle, cmp, n1, n2)
       JUMP-LE-OPCODE-FLOAT : ;YYY
         println("F JUMP-LE-FLOAT")
-        jump-float-op(x, y, jle, n1, n2)
+        jump-float-op(x, y, jbe, n1, n2)
       JUMP-LE-OPCODE-DOUBLE : ;YYY
         println("F JUMP-LE-DOUBLE")
-        jump-double-op(x, y, jle, n1, n2)
+        jump-double-op(x, y, jbe, n1, n2)
       JUMP-GE-OPCODE-INT : ;YYY
         println("F JUMP-GE-INT")
         debug(a, "JUMP-GE-INT %llx %llx\n" LOCAL(tmp1i(), x), LOCAL(tmp2i(), y))
@@ -1846,10 +1874,10 @@ public defn encode (fid:Int, func:VMFunction,
         jump-op(x, y, jge, cmp, n1, n2)
       JUMP-GE-OPCODE-FLOAT : ;YYY
         println("F JUMP-GE-FLOAT")
-        jump-float-op(x, y, jge, n1, n2)
+        jump-float-op(x, y, jae, n1, n2)
       JUMP-GE-OPCODE-DOUBLE : ;YYY
         println("F JUMP-GE-DOUBLE")
-        jump-double-op(x, y, jge, n1, n2)
+        jump-double-op(x, y, jae, n1, n2)
       JUMP-ULT-OPCODE-BYTE : ;YYY
         println("F JUMP-ULT-BYTE")
         debug(a, "JUMP-ULT-INT %llx %llx\n" LOCAL(tmp1b(), x), LOCAL(tmp2b(), y))
@@ -2918,3 +2946,239 @@ defn branch2-opcode (op:VMOp, xt:VMType) :
     (op:UgeOp, xt:VMByte) : JUMP-UGE-OPCODE-BYTE
     (op:UgeOp, xt:VMInt) : JUMP-UGE-OPCODE-INT
     (op:UgeOp, xt:VMLong) : JUMP-UGE-OPCODE-LONG
+
+public val opcode-names = IntTable<String>()
+opcode-names[SET-OPCODE-LOCAL] = "SET-OPCODE-LOCAL"
+opcode-names[SET-OPCODE-UNSIGNED] = "SET-OPCODE-UNSIGNED"
+opcode-names[SET-OPCODE-SIGNED] = "SET-OPCODE-SIGNED"
+opcode-names[SET-OPCODE-CODE] = "SET-OPCODE-CODE"
+opcode-names[SET-OPCODE-GLOBAL] = "SET-OPCODE-GLOBAL"
+opcode-names[SET-OPCODE-DATA] = "SET-OPCODE-DATA"
+opcode-names[SET-OPCODE-CONST] = "SET-OPCODE-CONST"
+opcode-names[SET-OPCODE-WIDE] = "SET-OPCODE-WIDE"
+opcode-names[SET-REG-OPCODE-LOCAL] = "SET-REG-OPCODE-LOCAL"
+opcode-names[SET-REG-OPCODE-UNSIGNED] = "SET-REG-OPCODE-UNSIGNED"
+opcode-names[SET-REG-OPCODE-SIGNED] = "SET-REG-OPCODE-SIGNED"
+opcode-names[SET-REG-OPCODE-CODE] = "SET-REG-OPCODE-CODE"
+opcode-names[SET-REG-OPCODE-GLOBAL] = "SET-REG-OPCODE-GLOBAL"
+opcode-names[SET-REG-OPCODE-DATA] = "SET-REG-OPCODE-DATA"
+opcode-names[SET-REG-OPCODE-CONST] = "SET-REG-OPCODE-CONST"
+opcode-names[SET-REG-OPCODE-WIDE] = "SET-REG-OPCODE-WIDE"
+opcode-names[GET-REG-OPCODE] = "GET-REG-OPCODE"
+opcode-names[CALL-OPCODE-LOCAL] = "CALL-OPCODE-LOCAL"
+opcode-names[CALL-OPCODE-CODE] = "CALL-OPCODE-CODE"
+opcode-names[CALL-CLOSURE-OPCODE] = "CALL-CLOSURE-OPCODE"
+opcode-names[TCALL-OPCODE-LOCAL] = "TCALL-OPCODE-LOCAL"
+opcode-names[TCALL-OPCODE-CODE] = "TCALL-OPCODE-CODE"
+opcode-names[TCALL-CLOSURE-OPCODE] = "TCALL-CLOSURE-OPCODE"
+opcode-names[CALLC-OPCODE-LOCAL] = "CALLC-OPCODE-LOCAL"
+opcode-names[CALLC-OPCODE-WIDE] = "CALLC-OPCODE-WIDE"
+opcode-names[POP-FRAME-OPCODE] = "POP-FRAME-OPCODE"
+opcode-names[LIVE-OPCODE] = "LIVE-OPCODE"
+opcode-names[YIELD-OPCODE] = "YIELD-OPCODE"
+opcode-names[RETURN-OPCODE] = "RETURN-OPCODE"
+opcode-names[DUMP-OPCODE] = "DUMP-OPCODE"
+opcode-names[INT-ADD-OPCODE] = "INT-ADD-OPCODE"
+opcode-names[INT-SUB-OPCODE] = "INT-SUB-OPCODE"
+opcode-names[INT-MUL-OPCODE] = "INT-MUL-OPCODE"
+opcode-names[INT-DIV-OPCODE] = "INT-DIV-OPCODE"
+opcode-names[INT-MOD-OPCODE] = "INT-MOD-OPCODE"
+opcode-names[INT-AND-OPCODE] = "INT-AND-OPCODE"
+opcode-names[INT-OR-OPCODE] = "INT-OR-OPCODE"
+opcode-names[INT-XOR-OPCODE] = "INT-XOR-OPCODE"
+opcode-names[INT-SHL-OPCODE] = "INT-SHL-OPCODE"
+opcode-names[INT-SHR-OPCODE] = "INT-SHR-OPCODE"
+opcode-names[INT-ASHR-OPCODE] = "INT-ASHR-OPCODE"
+opcode-names[INT-LT-OPCODE] = "INT-LT-OPCODE"
+opcode-names[INT-GT-OPCODE] = "INT-GT-OPCODE"
+opcode-names[INT-LE-OPCODE] = "INT-LE-OPCODE"
+opcode-names[INT-GE-OPCODE] = "INT-GE-OPCODE"
+opcode-names[EQ-OPCODE-REF-REF] = "EQ-OPCODE-REF-REF"
+opcode-names[EQ-OPCODE-REF] = "EQ-OPCODE-REF"
+opcode-names[EQ-OPCODE-BYTE] = "EQ-OPCODE-BYTE"
+opcode-names[EQ-OPCODE-INT] = "EQ-OPCODE-INT"
+opcode-names[EQ-OPCODE-LONG] = "EQ-OPCODE-LONG"
+opcode-names[EQ-OPCODE-FLOAT] = "EQ-OPCODE-FLOAT"
+opcode-names[EQ-OPCODE-DOUBLE] = "EQ-OPCODE-DOUBLE"
+opcode-names[NE-OPCODE-REF-REF] = "NE-OPCODE-REF-REF"
+opcode-names[NE-OPCODE-REF] = "NE-OPCODE-REF"
+opcode-names[NE-OPCODE-BYTE] = "NE-OPCODE-BYTE"
+opcode-names[NE-OPCODE-INT] = "NE-OPCODE-INT"
+opcode-names[NE-OPCODE-LONG] = "NE-OPCODE-LONG"
+opcode-names[NE-OPCODE-FLOAT] = "NE-OPCODE-FLOAT"
+opcode-names[NE-OPCODE-DOUBLE] = "NE-OPCODE-DOUBLE"
+opcode-names[ADD-OPCODE-BYTE] = "ADD-OPCODE-BYTE"
+opcode-names[ADD-OPCODE-INT] = "ADD-OPCODE-INT"
+opcode-names[ADD-OPCODE-LONG] = "ADD-OPCODE-LONG"
+opcode-names[ADD-OPCODE-FLOAT] = "ADD-OPCODE-FLOAT"
+opcode-names[ADD-OPCODE-DOUBLE] = "ADD-OPCODE-DOUBLE"
+opcode-names[SUB-OPCODE-BYTE] = "SUB-OPCODE-BYTE"
+opcode-names[SUB-OPCODE-INT] = "SUB-OPCODE-INT"
+opcode-names[SUB-OPCODE-LONG] = "SUB-OPCODE-LONG"
+opcode-names[SUB-OPCODE-FLOAT] = "SUB-OPCODE-FLOAT"
+opcode-names[SUB-OPCODE-DOUBLE] = "SUB-OPCODE-DOUBLE"
+opcode-names[MUL-OPCODE-BYTE] = "MUL-OPCODE-BYTE"
+opcode-names[MUL-OPCODE-INT] = "MUL-OPCODE-INT"
+opcode-names[MUL-OPCODE-LONG] = "MUL-OPCODE-LONG"
+opcode-names[MUL-OPCODE-FLOAT] = "MUL-OPCODE-FLOAT"
+opcode-names[MUL-OPCODE-DOUBLE] = "MUL-OPCODE-DOUBLE"
+opcode-names[DIV-OPCODE-BYTE] = "DIV-OPCODE-BYTE"
+opcode-names[DIV-OPCODE-INT] = "DIV-OPCODE-INT"
+opcode-names[DIV-OPCODE-LONG] = "DIV-OPCODE-LONG"
+opcode-names[DIV-OPCODE-FLOAT] = "DIV-OPCODE-FLOAT"
+opcode-names[DIV-OPCODE-DOUBLE] = "DIV-OPCODE-DOUBLE"
+opcode-names[MOD-OPCODE-BYTE] = "MOD-OPCODE-BYTE"
+opcode-names[MOD-OPCODE-INT] = "MOD-OPCODE-INT"
+opcode-names[MOD-OPCODE-LONG] = "MOD-OPCODE-LONG"
+opcode-names[AND-OPCODE-BYTE] = "AND-OPCODE-BYTE"
+opcode-names[AND-OPCODE-INT] = "AND-OPCODE-INT"
+opcode-names[AND-OPCODE-LONG] = "AND-OPCODE-LONG"
+opcode-names[OR-OPCODE-BYTE] = "OR-OPCODE-BYTE"
+opcode-names[OR-OPCODE-INT] = "OR-OPCODE-INT"
+opcode-names[OR-OPCODE-LONG] = "OR-OPCODE-LONG"
+opcode-names[XOR-OPCODE-BYTE] = "XOR-OPCODE-BYTE"
+opcode-names[XOR-OPCODE-INT] = "XOR-OPCODE-INT"
+opcode-names[XOR-OPCODE-LONG] = "XOR-OPCODE-LONG"
+opcode-names[SHL-OPCODE-BYTE] = "SHL-OPCODE-BYTE"
+opcode-names[SHL-OPCODE-INT] = "SHL-OPCODE-INT"
+opcode-names[SHL-OPCODE-LONG] = "SHL-OPCODE-LONG"
+opcode-names[SHR-OPCODE-BYTE] = "SHR-OPCODE-BYTE"
+opcode-names[SHR-OPCODE-INT] = "SHR-OPCODE-INT"
+opcode-names[SHR-OPCODE-LONG] = "SHR-OPCODE-LONG"
+opcode-names[ASHR-OPCODE-INT] = "ASHR-OPCODE-INT"
+opcode-names[ASHR-OPCODE-LONG] = "ASHR-OPCODE-LONG"
+opcode-names[LT-OPCODE-INT] = "LT-OPCODE-INT"
+opcode-names[LT-OPCODE-LONG] = "LT-OPCODE-LONG"
+opcode-names[LT-OPCODE-FLOAT] = "LT-OPCODE-FLOAT"
+opcode-names[LT-OPCODE-DOUBLE] = "LT-OPCODE-DOUBLE"
+opcode-names[GT-OPCODE-INT] = "GT-OPCODE-INT"
+opcode-names[GT-OPCODE-LONG] = "GT-OPCODE-LONG"
+opcode-names[GT-OPCODE-FLOAT] = "GT-OPCODE-FLOAT"
+opcode-names[GT-OPCODE-DOUBLE] = "GT-OPCODE-DOUBLE"
+opcode-names[LE-OPCODE-INT] = "LE-OPCODE-INT"
+opcode-names[LE-OPCODE-LONG] = "LE-OPCODE-LONG"
+opcode-names[LE-OPCODE-FLOAT] = "LE-OPCODE-FLOAT"
+opcode-names[LE-OPCODE-DOUBLE] = "LE-OPCODE-DOUBLE"
+opcode-names[GE-OPCODE-INT] = "GE-OPCODE-INT"
+opcode-names[GE-OPCODE-LONG] = "GE-OPCODE-LONG"
+opcode-names[GE-OPCODE-FLOAT] = "GE-OPCODE-FLOAT"
+opcode-names[GE-OPCODE-DOUBLE] = "GE-OPCODE-DOUBLE"
+opcode-names[ULE-OPCODE-BYTE] = "ULE-OPCODE-BYTE"
+opcode-names[ULE-OPCODE-INT] = "ULE-OPCODE-INT"
+opcode-names[ULE-OPCODE-LONG] = "ULE-OPCODE-LONG"
+opcode-names[ULT-OPCODE-BYTE] = "ULT-OPCODE-BYTE"
+opcode-names[ULT-OPCODE-INT] = "ULT-OPCODE-INT"
+opcode-names[ULT-OPCODE-LONG] = "ULT-OPCODE-LONG"
+opcode-names[UGT-OPCODE-BYTE] = "UGT-OPCODE-BYTE"
+opcode-names[UGT-OPCODE-INT] = "UGT-OPCODE-INT"
+opcode-names[UGT-OPCODE-LONG] = "UGT-OPCODE-LONG"
+opcode-names[UGE-OPCODE-BYTE] = "UGE-OPCODE-BYTE"
+opcode-names[UGE-OPCODE-INT] = "UGE-OPCODE-INT"
+opcode-names[UGE-OPCODE-LONG] = "UGE-OPCODE-LONG"
+opcode-names[INT-NOT-OPCODE] = "INT-NOT-OPCODE"
+opcode-names[INT-NEG-OPCODE] = "INT-NEG-OPCODE"
+opcode-names[NOT-OPCODE-BYTE] = "NOT-OPCODE-BYTE"
+opcode-names[NOT-OPCODE-INT] = "NOT-OPCODE-INT"
+opcode-names[NOT-OPCODE-LONG] = "NOT-OPCODE-LONG"
+opcode-names[NEG-OPCODE-INT] = "NEG-OPCODE-INT"
+opcode-names[NEG-OPCODE-LONG] = "NEG-OPCODE-LONG"
+opcode-names[NEG-OPCODE-FLOAT] = "NEG-OPCODE-FLOAT"
+opcode-names[NEG-OPCODE-DOUBLE] = "NEG-OPCODE-DOUBLE"
+opcode-names[DEREF-OPCODE] = "DEREF-OPCODE"
+opcode-names[TYPEOF-OPCODE] = "TYPEOF-OPCODE"
+opcode-names[JUMP-SET-OPCODE] = "JUMP-SET-OPCODE"
+opcode-names[JUMP-TAGBITS-OPCODE] = "JUMP-TAGBITS-OPCODE"
+opcode-names[JUMP-TAGWORD-OPCODE] = "JUMP-TAGWORD-OPCODE"
+opcode-names[GOTO-OPCODE] = "GOTO-OPCODE"
+opcode-names[CONV-OPCODE-BYTE-FLOAT] = "CONV-OPCODE-BYTE-FLOAT"
+opcode-names[CONV-OPCODE-BYTE-DOUBLE] = "CONV-OPCODE-BYTE-DOUBLE"
+opcode-names[CONV-OPCODE-INT-BYTE] = "CONV-OPCODE-INT-BYTE"
+opcode-names[CONV-OPCODE-INT-FLOAT] = "CONV-OPCODE-INT-FLOAT"
+opcode-names[CONV-OPCODE-INT-DOUBLE] = "CONV-OPCODE-INT-DOUBLE"
+opcode-names[CONV-OPCODE-LONG-BYTE] = "CONV-OPCODE-LONG-BYTE"
+opcode-names[CONV-OPCODE-LONG-INT] = "CONV-OPCODE-LONG-INT"
+opcode-names[CONV-OPCODE-LONG-FLOAT] = "CONV-OPCODE-LONG-FLOAT"
+opcode-names[CONV-OPCODE-LONG-DOUBLE] = "CONV-OPCODE-LONG-DOUBLE"
+opcode-names[CONV-OPCODE-FLOAT-BYTE] = "CONV-OPCODE-FLOAT-BYTE"
+opcode-names[CONV-OPCODE-FLOAT-INT] = "CONV-OPCODE-FLOAT-INT"
+opcode-names[CONV-OPCODE-FLOAT-LONG] = "CONV-OPCODE-FLOAT-LONG"
+opcode-names[CONV-OPCODE-FLOAT-DOUBLE] = "CONV-OPCODE-FLOAT-DOUBLE"
+opcode-names[CONV-OPCODE-DOUBLE-BYTE] = "CONV-OPCODE-DOUBLE-BYTE"
+opcode-names[CONV-OPCODE-DOUBLE-INT] = "CONV-OPCODE-DOUBLE-INT"
+opcode-names[CONV-OPCODE-DOUBLE-LONG] = "CONV-OPCODE-DOUBLE-LONG"
+opcode-names[CONV-OPCODE-DOUBLE-FLOAT] = "CONV-OPCODE-DOUBLE-FLOAT"
+opcode-names[DETAG-OPCODE] = "DETAG-OPCODE"
+opcode-names[TAG-OPCODE-BYTE] = "TAG-OPCODE-BYTE"
+opcode-names[TAG-OPCODE-CHAR] = "TAG-OPCODE-CHAR"
+opcode-names[TAG-OPCODE-INT] = "TAG-OPCODE-INT"
+opcode-names[TAG-OPCODE-FLOAT] = "TAG-OPCODE-FLOAT"
+opcode-names[STORE-OPCODE-1] = "STORE-OPCODE-1"
+opcode-names[STORE-OPCODE-4] = "STORE-OPCODE-4"
+opcode-names[STORE-OPCODE-8] = "STORE-OPCODE-8"
+opcode-names[STORE-OPCODE-1-VAR-OFFSET] = "STORE-OPCODE-1-VAR-OFFSET"
+opcode-names[STORE-OPCODE-4-VAR-OFFSET] = "STORE-OPCODE-4-VAR-OFFSET"
+opcode-names[STORE-OPCODE-8-VAR-OFFSET] = "STORE-OPCODE-8-VAR-OFFSET"
+opcode-names[LOAD-OPCODE-1] = "LOAD-OPCODE-1"
+opcode-names[LOAD-OPCODE-4] = "LOAD-OPCODE-4"
+opcode-names[LOAD-OPCODE-8] = "LOAD-OPCODE-8"
+opcode-names[LOAD-OPCODE-1-VAR-OFFSET] = "LOAD-OPCODE-1-VAR-OFFSET"
+opcode-names[LOAD-OPCODE-4-VAR-OFFSET] = "LOAD-OPCODE-4-VAR-OFFSET"
+opcode-names[LOAD-OPCODE-8-VAR-OFFSET] = "LOAD-OPCODE-8-VAR-OFFSET"
+opcode-names[RESERVE-OPCODE-LOCAL] = "RESERVE-OPCODE-LOCAL"
+opcode-names[RESERVE-OPCODE-CONST] = "RESERVE-OPCODE-CONST"
+opcode-names[ENTER-STACK-OPCODE] = "ENTER-STACK-OPCODE"
+opcode-names[ALLOC-OPCODE-CONST] = "ALLOC-OPCODE-CONST"
+opcode-names[ALLOC-OPCODE-LOCAL] = "ALLOC-OPCODE-LOCAL"
+opcode-names[GC-OPCODE] = "GC-OPCODE"
+opcode-names[CLASS-NAME-OPCODE] = "CLASS-NAME-OPCODE"
+opcode-names[C-RSP-OPCODE] = "C-RSP-OPCODE"
+opcode-names[PRINT-STACK-TRACE-OPCODE] = "PRINT-STACK-TRACE-OPCODE"
+opcode-names[FLUSH-VM-OPCODE] = "FLUSH-VM-OPCODE"
+opcode-names[JUMP-INT-LT-OPCODE] = "JUMP-INT-LT-OPCODE"
+opcode-names[JUMP-INT-GT-OPCODE] = "JUMP-INT-GT-OPCODE"
+opcode-names[JUMP-INT-LE-OPCODE] = "JUMP-INT-LE-OPCODE"
+opcode-names[JUMP-INT-GE-OPCODE] = "JUMP-INT-GE-OPCODE"
+opcode-names[JUMP-EQ-OPCODE-REF] = "JUMP-EQ-OPCODE-REF"
+opcode-names[JUMP-EQ-OPCODE-BYTE] = "JUMP-EQ-OPCODE-BYTE"
+opcode-names[JUMP-EQ-OPCODE-INT] = "JUMP-EQ-OPCODE-INT"
+opcode-names[JUMP-EQ-OPCODE-LONG] = "JUMP-EQ-OPCODE-LONG"
+opcode-names[JUMP-EQ-OPCODE-FLOAT] = "JUMP-EQ-OPCODE-FLOAT"
+opcode-names[JUMP-EQ-OPCODE-DOUBLE] = "JUMP-EQ-OPCODE-DOUBLE"
+opcode-names[JUMP-NE-OPCODE-REF] = "JUMP-NE-OPCODE-REF"
+opcode-names[JUMP-NE-OPCODE-BYTE] = "JUMP-NE-OPCODE-BYTE"
+opcode-names[JUMP-NE-OPCODE-INT] = "JUMP-NE-OPCODE-INT"
+opcode-names[JUMP-NE-OPCODE-LONG] = "JUMP-NE-OPCODE-LONG"
+opcode-names[JUMP-NE-OPCODE-FLOAT] = "JUMP-NE-OPCODE-FLOAT"
+opcode-names[JUMP-NE-OPCODE-DOUBLE] = "JUMP-NE-OPCODE-DOUBLE"
+opcode-names[JUMP-LT-OPCODE-INT] = "JUMP-LT-OPCODE-INT"
+opcode-names[JUMP-LT-OPCODE-LONG] = "JUMP-LT-OPCODE-LONG"
+opcode-names[JUMP-LT-OPCODE-FLOAT] = "JUMP-LT-OPCODE-FLOAT"
+opcode-names[JUMP-LT-OPCODE-DOUBLE] = "JUMP-LT-OPCODE-DOUBLE"
+opcode-names[JUMP-GT-OPCODE-INT] = "JUMP-GT-OPCODE-INT"
+opcode-names[JUMP-GT-OPCODE-LONG] = "JUMP-GT-OPCODE-LONG"
+opcode-names[JUMP-GT-OPCODE-FLOAT] = "JUMP-GT-OPCODE-FLOAT"
+opcode-names[JUMP-GT-OPCODE-DOUBLE] = "JUMP-GT-OPCODE-DOUBLE"
+opcode-names[JUMP-LE-OPCODE-INT] = "JUMP-LE-OPCODE-INT"
+opcode-names[JUMP-LE-OPCODE-LONG] = "JUMP-LE-OPCODE-LONG"
+opcode-names[JUMP-LE-OPCODE-FLOAT] = "JUMP-LE-OPCODE-FLOAT"
+opcode-names[JUMP-LE-OPCODE-DOUBLE] = "JUMP-LE-OPCODE-DOUBLE"
+opcode-names[JUMP-GE-OPCODE-INT] = "JUMP-GE-OPCODE-INT"
+opcode-names[JUMP-GE-OPCODE-LONG] = "JUMP-GE-OPCODE-LONG"
+opcode-names[JUMP-GE-OPCODE-FLOAT] = "JUMP-GE-OPCODE-FLOAT"
+opcode-names[JUMP-GE-OPCODE-DOUBLE] = "JUMP-GE-OPCODE-DOUBLE"
+opcode-names[JUMP-ULE-OPCODE-BYTE] = "JUMP-ULE-OPCODE-BYTE"
+opcode-names[JUMP-ULE-OPCODE-INT] = "JUMP-ULE-OPCODE-INT"
+opcode-names[JUMP-ULE-OPCODE-LONG] = "JUMP-ULE-OPCODE-LONG"
+opcode-names[JUMP-ULT-OPCODE-BYTE] = "JUMP-ULT-OPCODE-BYTE"
+opcode-names[JUMP-ULT-OPCODE-INT] = "JUMP-ULT-OPCODE-INT"
+opcode-names[JUMP-ULT-OPCODE-LONG] = "JUMP-ULT-OPCODE-LONG"
+opcode-names[JUMP-UGT-OPCODE-BYTE] = "JUMP-UGT-OPCODE-BYTE"
+opcode-names[JUMP-UGT-OPCODE-INT] = "JUMP-UGT-OPCODE-INT"
+opcode-names[JUMP-UGT-OPCODE-LONG] = "JUMP-UGT-OPCODE-LONG"
+opcode-names[JUMP-UGE-OPCODE-BYTE] = "JUMP-UGE-OPCODE-BYTE"
+opcode-names[JUMP-UGE-OPCODE-INT] = "JUMP-UGE-OPCODE-INT"
+opcode-names[JUMP-UGE-OPCODE-LONG] = "JUMP-UGE-OPCODE-LONG"
+opcode-names[DISPATCH-OPCODE] = "DISPATCH-OPCODE"
+opcode-names[DISPATCH-METHOD-OPCODE] = "DISPATCH-METHOD-OPCODE"
+opcode-names[JUMP-REG-OPCODE] = "JUMP-REG-OPCODE"
+opcode-names[FNENTRY-OPCODE] = "FNENTRY-OPCODE"
