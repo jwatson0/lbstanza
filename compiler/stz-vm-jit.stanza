@@ -235,18 +235,20 @@ defn all-restore-registers (a:Assembler) :
   for reg in reverse $ to-list $ all-saved-registers() do :
     pop(a, reg)
 
-defn debug (a:Assembler, format:String, a0:Gp, a1:Gp) :
+defn debug (a:Assembler, format:String, a0:Gp, a1:Gp, a2:Gp) :
   all-save-registers(a)
   mov(a, rdi(), printf-format(format))
   mov(a, rsi(), a0)
   mov(a, rdx(), a1)
+  mov(a, rcx(), a2)
   mov(a, rax(), 0L)
   mov(a, tmp1(), printf-addr())
   call(a, tmp1())
   all-restore-registers(a)
 
-defn debug (a:Assembler, format:String) : debug(a, format, rax(), rax())
-defn debug (a:Assembler, format:String, a0:Gp) : debug(a, format, a0, rax())
+defn debug (a:Assembler, format:String) : debug(a, format, rax(), rax(), rax())
+defn debug (a:Assembler, format:String, a0:Gp) : debug(a, format, a0, rax(), rax())
+defn debug (a:Assembler, format:String, a0:Gp, a1:Gp) : debug(a, format, a0, a1, rax())
 
 extern dump_registers: () -> int
 
@@ -300,7 +302,7 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
   ; Setup JIT registers
   mov(a, tmp1(), c-params()[0])
   push(a, tmp1()) ;PUSHING RSP
-  debug(a, "JIT CRSP TMP1 %llx\n" tmp1())
+  debug(a, "JIT CRSP TMP1 %llx SP %llx\n" tmp1(), rsp())
   mov(a, tmp1(), MemPtr(rsp(), 0, SIZEOF-LONG))
   debug(a, "JIT CRSP SP[0] %llx\n" tmp1())
   mov(a, vmstate(), vms)
@@ -353,18 +355,14 @@ defn dump-state (a:Assembler, msg:String) :
   dump-memory-64(a, stack-pointer(), 6L)
 
 public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func) -> Func :
-  val size-required = rdx()
+  val size-required = tmp3()
   val code = code-holder-new(rt)
   val a = assembler-new(code)
   val end-label = new-label(a)
   debug(a, "EXTEND-STACK %llx\n", size-required)
-  ; dump-state(a, "STATE BEFORE:\n")
-  ; mov(a, tmp2(), stack-pointer()) ; SAVE SP
   ;Save current stack
   mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), stack-pointer())
-  ; lea(a, tmp1(), MemPtr(end-label, 0, SIZEOF-LONG))
   ;Swap stack and registers
-  ; mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), tmp1())
   mov(a, MemPtr(vmstate(), VMSTATE-CURRENT-STACK-OFFSET, SIZEOF-LONG), vmstate-reg(a, VMSTATE-SYSTEM-STACK-OFFSET))
   mov(a, MemPtr(vmstate(), VMSTATE-SYSTEM-STACK-OFFSET, SIZEOF-LONG), current-stack())
   mov(a, MemPtr(vmstate(), VMSTATE-REGISTERS-OFFSET, SIZEOF-LONG), vmstate-reg(a, VMSTATE-SYSTEM-REGISTERS-OFFSET))
@@ -375,20 +373,13 @@ public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func)
   mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG))
   mov(a, registers(), MemPtr(vmstate(), VMSTATE-REGISTERS-OFFSET, SIZEOF-LONG))
   ;Set arguments
-  ; dump-stack-frame(a, tmp2())
   SET-REG(a, 0, do-BOOLREF(a, CONST(a, tmp1(), 0)))
   SET-REG(a, 1, CONST(a, tmp1(), 1))
   SET-REG(a, 1, size-required)
-  ; dump-stack-frame(a, tmp2())
   mov(a, stack-pointer(), MemPtr(stk(), STACK-FRAMES-OFFSET, SIZEOF-LONG))
   mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), CONST(a, tmp1(), value(stack-overflow-return)))
-  ; dump-stack-frame(a, tmp2())
-  ; dump-state(a, "STATE AFTER:\n")
   mov(a, tmp2(), MemPtr(functions(), SIZEOF-LONG * EXTEND-STACK-FN, SIZEOF-LONG))
   jmp(a, tmp2())
-  ; ;TEST INVERSE
-  ; mov(a, tmp2(), value(stack-overflow-return))
-  ; jmp(a, tmp2())
   bind(a, end-label)
   add(rt, code)
 
@@ -397,7 +388,6 @@ public defn make-extend-stack-return (rt:JitRuntime) -> Func :
   val a = assembler-new(code)
   ;System stack no longer needed
   debug(a, "EXTEND-STACK-RETURN\n")
-  ; dump-state(a, "STATE BEFORE:\n")
   mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), CONST(a, tmp1(), 0))
   debug(a, "SWAP-STACK-AND-REGISTERS\n")
   ;Swap stack and registers
@@ -411,10 +401,8 @@ public defn make-extend-stack-return (rt:JitRuntime) -> Func :
   untag-stack(a, stk(), current-stack())
   mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG))
   mov(a, registers(), MemPtr(vmstate(), VMSTATE-REGISTERS-OFFSET, SIZEOF-LONG))
-  ; dump-state(a, "STATE AFTER:\n")
   ;Continue where we were
   mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
-  debug(a, "CONTINUE-WHERE-WE-WERE %llx\n" tmp1())
   jmp(a, tmp1())
   add(rt, code)
 
@@ -589,14 +577,18 @@ public defn encode (fid:Int, func:VMFunction,
     ; stack_pointer = (StackFrame*)((char*)stack_pointer - sizeof(StackFrame) - (num_locals) * SIZEOF-LONG)
     false
 
-  defn SAVE-STATE () :
+  defn SAVE-STATE-ONLY () :
     mov(a, MemPtr(vmstate(), VMSTATE-HEAP-TOP-OFFSET, SIZEOF-LONG), heap-top())
     mov(a, MemPtr(vmstate(), VMSTATE-CURRENT-STACK-OFFSET, SIZEOF-LONG), current-stack())
     mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), stack-pointer())
-    caller-save-registers(a)
     ; vms->heap_top = heap_top
     ; vms->current_stack = current_stack
     ; stk->stack_pointer = stack_pointer
+    false
+
+  defn SAVE-STATE () :
+    SAVE-STATE-ONLY()
+    caller-save-registers(a)
     false
 
   defn RESTORE-STATE () :
@@ -652,7 +644,7 @@ public defn encode (fid:Int, func:VMFunction,
         val all-good-label = new-label(a)
         val frame-size = value * SIZEOF-LONG + SIZEOF-STACK-FRAME
         val size-required = frame-size + SIZEOF-STACK-FRAME
-        ;Size-required must be in rax to line up for extend-stack-launch
+        ;Size-required must be in tmp3 to line up for extend-stack-launch
         add(a, CONST(tmp3(), size-required), stack-pointer())
         debug(a, "STACK CHECK %llx %llx\n", tmp3(), stack-limit())
         cmp(a, tmp3(), stack-limit())
@@ -662,11 +654,10 @@ public defn encode (fid:Int, func:VMFunction,
         PUSH-FRAME(0, all-good-label)
         jmp(a, CONST(tmp1(), extend-stack-launch-value))
         bind(a, all-good-label)
-        false
       DISPATCH-OPCODE :
         println("A DISPATCH")
         val tgts = new-label(a)
-        val idx = read-dispatch-table(a, vmstate(), CONST(tmp1(), value as Int))
+        val idx = read-dispatch-table(a, vmstate(), CONST(tmp1(), value))
         mov(a, tmp1(), idx)
         lea(a, tmp2(), MemPtr(tgts, 0, SIZEOF-LONG))
         ; debug(a, "TGTS %llx\n", tmp2())
@@ -678,20 +669,21 @@ public defn encode (fid:Int, func:VMFunction,
       TCALL-CLOSURE-OPCODE : ;YYY
         println("A TCALL-CLOSURE")
         debug(a, "TCALL-CLOSURE\n")
-        LOCAL(tmp1(), value as Int)
+        LOCAL(tmp1(), value)
         mov(a, rbx(), MemPtr(tmp1(), FUNCTION-CODE-OFFSET + SIZEOF-LONG - REF-TAG-BITS, SIZEOF-LONG))
         debug(a, "TCODE %llx\n", rbx())
         do-tcall(rbx())
       POP-FRAME-OPCODE : ;YYY
         println("A POP-FRAME")
-        val num-locals = value as Int
+        val num-locals = value
         POP-FRAME(num-locals)
       ENTER-STACK-OPCODE : ;YYY
         println("A ENTER-STACK")
+        debug(a, "ENTER STACK\n")
         ;Save current stack
         mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), stack-pointer())
         ;Load next stack
-        mov(a, current-stack(), LOCAL(tmp1(), value as Int))
+        mov(a, current-stack(), LOCAL(tmp1(), value))
         untag-stack(a, stk(), current-stack())
         mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG))
         ;Load starting address
@@ -699,13 +691,14 @@ public defn encode (fid:Int, func:VMFunction,
         jmp(a, tmp1())
       YIELD-OPCODE : ;YYY
         println("A YIELD")
+        debug(a, "YIELD\n")
         val continue-label = new-label(a)
         ;Save current stack
         mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), stack-pointer())
         lea(a, tmp2(), MemPtr(continue-label, 0, SIZEOF-LONG))
         mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), tmp2())
         ;Load next stack
-        mov(a, current-stack(), LOCAL(tmp1(), value as Int))
+        mov(a, current-stack(), LOCAL(tmp1(), value))
         untag-stack(a, stk(), current-stack())
         mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG))
         ;Load starting address
@@ -724,31 +717,37 @@ public defn encode (fid:Int, func:VMFunction,
         println("A DUMP XXX")
       LIVE-OPCODE : ;YYY
         println("A LIVE")
-        mov(a, tmp2(), to-long(value as Int))
+        mov(a, tmp2(), to-long(value))
         mov(a, MemPtr(stack-pointer(), STACK-FRAME-LIVENESS-MAP-OFFSET, SIZEOF-LONG), tmp2())
         ; stack_pointer->liveness_map = value;
       DISPATCH-METHOD-OPCODE :
         println("A DISPATCH-METHOD")
         val code-label = new-label(a)
         val tgts = new-label(a)
-        read-dispatch-table(a, vmstate(), CONST(tmp1(), value as Int))
-        cmp(a, rax(), CONST(tmp1(), 2)) ; < 2 are targets and >= 2 are methods to goto
+        read-dispatch-table(a, vmstate(), CONST(tmp1(), value))
+        mov(a, tmp3(), rax())
+        debug(a, "DISPATCH-TABLE %lld %llx\n" tmp3(), tmp1())
+        cmp(a, tmp3(), CONST(tmp1(), 2)) ; < 2 are targets and >= 2 are methods to goto
         jge(a, code-label)
-        mov(a, tmp2(), MemPtr(tgts, 0, SIZEOF-LONG))
-        mov(a, tmp2(), MemPtr(tmp2(), rax(), 3, 0, SIZEOF-LONG))
-        debug(a, "DISPATCH %lld %llx\n", tmp1(), tmp2())
+        debug(a, "DISPATCH LABELS\n")
+        lea(a, tmp2(), MemPtr(tgts, 0, SIZEOF-LONG))
+        debug(a, "DISPATCH LABELS %llx\n" tmp2())
+        mov(a, tmp2(), MemPtr(tmp2(), tmp3(), 3, 0, SIZEOF-LONG))
+        debug(a, "DISPATCHED %lld %llx\n", tmp3(), tmp2())
         jmp(a, tmp2())
         bind(a, code-label)
-        mov(a, tmp2(), MemPtr(functions(), rax(), 3, -2 * SIZEOF-LONG, SIZEOF-LONG))
-        debug(a, "DISPATCH METHOD %lld %llx\n", rax(), tmp2())
+        mov(a, tmp2(), MemPtr(functions(), tmp3(), 3, -2 * SIZEOF-LONG, SIZEOF-LONG))
+        debug(a, "DISPATCH METHOD %lld %llx\n", tmp3(), tmp2())
         jmp(a, tmp2())
+        bind(a, tgts)
       FLUSH-VM-OPCODE : ;YYY
         println("A FLUSH-VM")
-        SAVE-STATE()
-        SET-LOCAL(value as Int, vmstate())
+        SAVE-STATE-ONLY()
+        debug(a, "FLUSH-VM\n")
+        SET-LOCAL(value, vmstate())
       C-RSP-OPCODE : ;YYY
         println("A C-RSP")
-        SAVE-STATE()
+        debug(a, "C-RSP\n")
         SET-LOCAL(value, GET-CRSP(tmp1()))
       else :
         println("MISSING A OPCODE %_" % [opcode])
@@ -1062,9 +1061,10 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, tmp1())
       SET-OPCODE-CONST : ;YYY
         println("C SET-CONST")
-        debug(a, "SET-CONST %d\n", CONST(tmp1(), value))
         mov(a, tmp2(), MemPtr(const-table(), CONST(tmp1(), value), 3, 0, SIZEOF-LONG))
+        debug(a, "SET-CONST %d %llx\n", CONST(tmp1(), value), tmp2())
         SET-LOCAL(x, tmp2())
+        dump-memory-64(a, const-table(), 10L)
       else :
         println("MISSING C OPCODE %_" % [opcode])
 
@@ -1187,12 +1187,16 @@ public defn encode (fid:Int, func:VMFunction,
         println("C INT-SHR")
         shr(a, LOCAL(rcx(), value), 32)
         shr(a, LOCAL(tmp1(), y), rcx())
+        shr(a, tmp1(), 32)
+        shl(a, tmp1(), 32)
         debug(a, "INT-SHR %llx >> %d\n" tmp1(), tmp2())
         SET-LOCAL(x, tmp1())
       INT-ASHR-OPCODE : ;YYY
         println("C INT-ASHR")
         shr(a, LOCAL(rcx(), value), 32)
         ashr(a, LOCAL(tmp1(), y), rcx())
+        shr(a, tmp1(), 32)
+        shl(a, tmp1(), 32)
         debug(a, "INT-ASHR %llx >>> %d\n" tmp1(), rcx())
         SET-LOCAL(x, tmp1())
       INT-LT-OPCODE : ;YYY
@@ -1631,19 +1635,18 @@ public defn encode (fid:Int, func:VMFunction,
     switch(opcode) :
       CALLC-OPCODE-WIDE :  ;YYY
         println("D CALLC-WIDE")
-        debug(a, "CALLC-WIDE\n")
         val end-label = new-label(a)
         val faddr = value
         val num_locals = x
         PUSH-FRAME(num_locals, end-label)
         SAVE-STATE()
         mov(a, tmp1(), faddr)
+        debug(a, "CALLC-WIDE %llx\n" tmp1())
         c-trampoline(a, tmp1(), registers(), registers())
         RESTORE-STATE()
         ; debug(a, "JMP RETURN\n")
         ; mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
         ; jmp(a, tmp1())
-        debug(a, "POP-FRAME\n")
         POP-FRAME(num_locals)
         bind(a, end-label)
       SET-OPCODE-WIDE : ;YYY
