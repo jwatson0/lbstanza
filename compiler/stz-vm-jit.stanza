@@ -451,6 +451,7 @@ public defn encode (fid:Int, func:VMFunction,
   val fileinfo-table = Vector<FileInfoEntry>()
   defn record-info (info:FileInfo|False) :
     match(info:FileInfo) :
+      debug(a, "+++ %s\n", CONST(tmp1(), printf-format(to-string(info))))
       add(fileinfo-table, FileInfoEntry(buffer-pos(), info))
 
   ;Calculation of sizes
@@ -679,16 +680,25 @@ public defn encode (fid:Int, func:VMFunction,
         POP-FRAME(num-locals)
       ENTER-STACK-OPCODE : ;YYY
         println("A ENTER-STACK")
-        debug(a, "ENTER STACK\n")
+        debug(a, "ENTER STACK %d\n" CONST(tmp1(), value))
         ;Save current stack
         mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), stack-pointer())
+        val saved-label = new-label(a)
+        lea(a, tmp1(), MemPtr(saved-label, 0, SIZEOF-LONG))
+        mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), tmp1())
         ;Load next stack
         mov(a, current-stack(), LOCAL(tmp1(), value))
+        debug(a, "ENTER STACK %llx\n" tmp1())
         untag-stack(a, stk(), current-stack())
-        mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG))
+        debug(a, "STK %llx\n" stk())
+        mov(a, stack-pointer(), MemPtr(stk(), STACK-FRAMES-OFFSET, SIZEOF-LONG))
         ;Load starting address
-        mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
-        jmp(a, tmp1())
+        mov(a, tmp1(), MemPtr(stk(), STACK-PC-OFFSET, SIZEOF-LONG))
+        debug(a, "ENTER STACK JUMP FID %llx\n" tmp1())
+        mov(a, tmp2(), MemPtr(functions(), tmp1(), 3, 0, SIZEOF-LONG))
+        debug(a, "ENTER STACK JUMP ADDR %llx\n" tmp2())
+        jmp(a, tmp2())
+        bind(a, saved-label)
       YIELD-OPCODE : ;YYY
         println("A YIELD")
         debug(a, "YIELD\n")
@@ -696,13 +706,15 @@ public defn encode (fid:Int, func:VMFunction,
         ;Save current stack
         mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), stack-pointer())
         lea(a, tmp2(), MemPtr(continue-label, 0, SIZEOF-LONG))
-        mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), tmp2())
+        mov(a, MemPtr(stk(), STACK-PC-OFFSET, SIZEOF-LONG), tmp2())
         ;Load next stack
+        debug(a, "LOAD NEXT STACK\n")
         mov(a, current-stack(), LOCAL(tmp1(), value))
         untag-stack(a, stk(), current-stack())
         mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG))
         ;Load starting address
-        mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
+        mov(a, tmp1(), MemPtr(stk(), STACK-PC-OFFSET, SIZEOF-LONG))
+        debug(a, "SAVED PC %llx\n", tmp1())
         jmp(a, tmp1())
         bind(a, continue-label)
       RETURN-OPCODE : 
@@ -1023,7 +1035,7 @@ public defn encode (fid:Int, func:VMFunction,
       SET-REG-OPCODE-CONST : ;YYY
         println("C SET-REG-CONST X %_ VALUE %_" % [x, value])
         debug(a, "SET-REG-CONST %d\n", CONST(tmp3(), value))
-        dump-memory-64(a, const-table(), 16L)
+        dump-memory-64(a, const-table(), 100L)
         mov(a, tmp1(), MemPtr(const-table(), CONST(tmp3(), value), 3, 0, SIZEOF-LONG))
         SET-REG(x, tmp1())
       SET-REG-OPCODE-UNSIGNED : ;YYY
@@ -1130,6 +1142,12 @@ public defn encode (fid:Int, func:VMFunction,
 
   defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Int) :
     add(covered, opcode)
+    defn do-alloc (type:Int, num-bytes:Gp) :
+      val top = heap-top() ; TMP1
+      mov(a, MemPtr(top, 0, SIZEOF-LONG), CONST(tmp2(), value))
+      SET-LOCAL(x, ptr-to-ref(tmp2(), top))
+      add(a, top, num-bytes)
+      mov(a, MemPtr(vmstate(), VMSTATE-HEAP-TOP-OFFSET, SIZEOF-LONG), top)
     switch(opcode) :
       INT-ADD-OPCODE :
         println("C INT-ADD")
@@ -1610,23 +1628,16 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, res)
       ALLOC-OPCODE-LOCAL : ;YYY
         println("C ALLOC-LOCAL X %_ Y %_ VALUE %_" % [x, y, value])
-        val top = heap-top() ; TMP1
-        mov(a, MemPtr(top, 0, SIZEOF-LONG), CONST(tmp2(), value))
-        SET-LOCAL(x, ptr-to-ref(tmp2(), top))
-        val num-bytes = tmp2()
-        add(a, LOCAL(num-bytes, y), 8 + 7)
-        debug(a, "NUM-BYTES %llx\n", num-bytes)
+        debug(a, "ALLOC-LOCAL\n")
+        val num-bytes = tmp3()
+        LOCAL(num-bytes, y)
+        add(a, num-bytes, 8 + 7)
         and-op(a, num-bytes, CONST(rax(), (- 8L)))
-        add(a, top, num-bytes)
-        ; debug(a, "NUM-BYTES %llx TOP %llx\n" num-bytes top)
-        mov(a, MemPtr(vmstate(), VMSTATE-HEAP-TOP-OFFSET, SIZEOF-LONG), top)
+        do-alloc(value, num-bytes)
       ALLOC-OPCODE-CONST : ;YYY
         println("C ALLOC-CONST X %_ Y %_ VALUE %_" % [x, y, value])
-        val top = heap-top() ; TMP1
-        mov(a, MemPtr(top, 0, SIZEOF-LONG), CONST(tmp2(), value))
-        SET-LOCAL(x, ptr-to-ref(tmp2(), top))
-        add(a, top, CONST(tmp2(), 8 + y))
-        mov(a, MemPtr(vmstate(), VMSTATE-HEAP-TOP-OFFSET, SIZEOF-LONG), top)
+        debug(a, "ALLOC-CONST\n")
+        do-alloc(value, CONST(tmp3(), 8 + y))
       else :
         println("MISSING C OPCODE %_" % [opcode])
 
@@ -1956,7 +1967,7 @@ public defn encode (fid:Int, func:VMFunction,
     ;==================================================
     ;============== Fundamental State =================
     ;==================================================
-    ;Reserve extra 3 locals for temporary moving
+    ; extra 3 locals for temporary moving
     val max-local = maximum(-1, seq(local, defs(func)))
     val num-locals = max-local + 1 + 3
 
