@@ -354,7 +354,7 @@ defn dump-state (a:Assembler, msg:String) :
   debug(a, "STACK-POINTER: %llx\n", stack-pointer())
   dump-memory-64(a, stack-pointer(), 6L)
 
-public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func) -> Func :
+public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func) -> Func : ;, continue:Label
   val size-required = tmp3()
   val code = code-holder-new(rt)
   val a = assembler-new(code)
@@ -362,6 +362,8 @@ public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func)
   debug(a, "EXTEND-STACK %llx\n", size-required)
   ;Save current stack
   mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), stack-pointer())
+  ; lea(a, tmp1(), MemPtr(continue, 0, SIZEOF-LONG))
+  ; mov(a, MemPtr(stk(), STACK-PC-OFFSET, SIZEOF-LONG), tmp1())
   ;Swap stack and registers
   mov(a, MemPtr(vmstate(), VMSTATE-CURRENT-STACK-OFFSET, SIZEOF-LONG), vmstate-reg(a, VMSTATE-SYSTEM-STACK-OFFSET))
   mov(a, MemPtr(vmstate(), VMSTATE-SYSTEM-STACK-OFFSET, SIZEOF-LONG), current-stack())
@@ -685,7 +687,8 @@ public defn encode (fid:Int, func:VMFunction,
         mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), stack-pointer())
         val saved-label = new-label(a)
         lea(a, tmp1(), MemPtr(saved-label, 0, SIZEOF-LONG))
-        mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), tmp1())
+        mov(a, MemPtr(stk(), STACK-PC-OFFSET, SIZEOF-LONG), tmp1())
+        debug(a, "SET STK-PC %llx\n" tmp1())
         ;Load next stack
         mov(a, current-stack(), LOCAL(tmp1(), value))
         debug(a, "ENTER STACK %llx\n" tmp1())
@@ -715,6 +718,7 @@ public defn encode (fid:Int, func:VMFunction,
         ;Load starting address
         mov(a, tmp1(), MemPtr(stk(), STACK-PC-OFFSET, SIZEOF-LONG))
         debug(a, "SAVED PC %llx\n", tmp1())
+        ; mov(a, tmp2(), MemPtr(functions(), tmp1(), 3, 0, SIZEOF-LONG))
         jmp(a, tmp1())
         bind(a, continue-label)
       RETURN-OPCODE : 
@@ -1035,7 +1039,7 @@ public defn encode (fid:Int, func:VMFunction,
       SET-REG-OPCODE-CONST : ;YYY
         println("C SET-REG-CONST X %_ VALUE %_" % [x, value])
         debug(a, "SET-REG-CONST %d\n", CONST(tmp3(), value))
-        dump-memory-64(a, const-table(), 100L)
+        ; dump-memory-64(a, const-table(), 100L)
         mov(a, tmp1(), MemPtr(const-table(), CONST(tmp3(), value), 3, 0, SIZEOF-LONG))
         SET-REG(x, tmp1())
       SET-REG-OPCODE-UNSIGNED : ;YYY
@@ -1708,12 +1712,12 @@ public defn encode (fid:Int, func:VMFunction,
         mov(a, tmp3(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-BYTE))
         debug(a, "LOAD-1 %llx %llx: ", LOCAL(tmp1(), y), CONST(tmp2(), value))
         debug(a, "%llx\n", tmp3())
-        SET-LOCAL(x, tmp3())
+        SET-LOCAL-BYTE(x, tmp3())
       LOAD-OPCODE-4 :  ;YYY
         println("D LOAD-4 X %_ Y %_ VALUE %_" % [x, y, value])
         debug(a, "LOAD-4 %llx %llx\n", LOCAL(tmp1(), y), CONST(tmp2(), value))
         mov(a, tmp2(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-INT))
-        SET-LOCAL(x, tmp2())
+        SET-LOCAL-INT(x, tmp2())
       LOAD-OPCODE-8 : ;YYY
         println("D LOAD-8 X %_ Y %_ VALUE %_" % [x, y, value])
         debug(a, "LOAD-8 %llx %llx\n", LOCAL(tmp1(), y), CONST(tmp2(), value))
@@ -1722,12 +1726,12 @@ public defn encode (fid:Int, func:VMFunction,
       LOAD-OPCODE-1-VAR-OFFSET : ;YYY
         println("E LOAD-1-VAR-OFFSET")
         mov(a, tmp3(), MemPtr(LOCAL(tmp2(), y), LOCAL(tmp1(), z), 0, value, SIZEOF-BYTE))
-        SET-LOCAL(x, tmp3())
+        SET-LOCAL-BYTE(x, tmp3())
       LOAD-OPCODE-4-VAR-OFFSET : ;YYY
         println("E LOAD-4-VAR-OFFSET X %_ Y %_ Z %_ VALUE %_" % [x, y, z, value])
         mov(a, tmp3(), MemPtr(LOCAL(tmp2(), y), LOCAL(tmp1(), z), 0, value, SIZEOF-INT))
         debug(a, "LOAD-4-VAR-OFFSET %llx %llx\n", tmp2(), tmp1())
-        SET-LOCAL(x, tmp3())
+        SET-LOCAL-INT(x, tmp3())
       LOAD-OPCODE-8-VAR-OFFSET : ;YYY
         println("E LOAD-8-VAR-OFFSET")
         mov(a, tmp3(), MemPtr(LOCAL(tmp2(), y), LOCAL(tmp1(), z), 0, value, SIZEOF-LONG))
