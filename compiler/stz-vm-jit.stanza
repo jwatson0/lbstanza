@@ -13,7 +13,8 @@ defpackage stz/vm-jit :
   import stz/dispatch-dag
   import stz/asmjit
 
-val debugging? = true
+val debugging? = false
+val tracing? = true
 
 defn plop (x) : println(x) when debugging?
 
@@ -241,6 +242,22 @@ defn all-save-registers (a:Assembler) :
 defn all-restore-registers (a:Assembler) :
   for reg in reverse $ to-list $ all-saved-registers() do :
     pop(a, reg)
+
+defn trace (a:Assembler, format:String, a0:Gp, a1:Gp, a2:Gp) :
+  if tracing? :
+    all-save-registers(a)
+    mov(a, rdi(), printf-format(format))
+    mov(a, rsi(), a0)
+    mov(a, rdx(), a1)
+    mov(a, rcx(), a2)
+    mov(a, rax(), 0L)
+    mov(a, tmp1(), printf-addr())
+    call(a, tmp1())
+    all-restore-registers(a)
+
+defn trace (a:Assembler, format:String) : trace(a, format, rax(), rax(), rax())
+defn trace (a:Assembler, format:String, a0:Gp) : trace(a, format, a0, rax(), rax())
+defn trace (a:Assembler, format:String, a0:Gp, a1:Gp) : trace(a, format, a0, a1, rax())
 
 defn debug (a:Assembler, format:String, a0:Gp, a1:Gp, a2:Gp) :
   if debugging? :
@@ -623,8 +640,13 @@ public defn encode (fid:Int, func:VMFunction,
     do-tcall(f)
     bind(a, end-label)
 
-  defn emit-ins-a (opcode:Int, value:Label) :
+  defn trace-opcode (opcode:Int) :
+    val name = string-join([ opcode-names[opcode] "\n" ])
+    trace(a, name)
     add(covered, opcode)
+
+  defn emit-ins-a (opcode:Int, value:Label) :
+    trace-opcode(opcode)
     switch(opcode) :
       GOTO-OPCODE : 
         plop("A GOTO")
@@ -632,7 +654,7 @@ public defn encode (fid:Int, func:VMFunction,
         jmp(a, value as Label)
 
   defn emit-ins-a (opcode:Int, value:Int) :
-    add(covered, opcode)
+    trace-opcode(opcode)
     switch(opcode) :
       FNENTRY-OPCODE : ;YYY
         plop("A FNENTRY")
@@ -776,7 +798,7 @@ public defn encode (fid:Int, func:VMFunction,
     dst
 
   defn emit-ins-b (opcode:Int, x:Int, value:Int) :
-    add(covered, opcode)
+    trace-opcode(opcode)
     switch(opcode) :
       INT-NOT-OPCODE : ;YYY
         plop("B INT-NOT")
@@ -946,7 +968,7 @@ public defn encode (fid:Int, func:VMFunction,
         plop("MISSING B OPCODE %_" % [opcode])
 
   defn emit-ins-c (opcode:Int, x:Int, value:Int) :
-    add(covered, opcode)
+    trace-opcode(opcode)
     switch(opcode) :
       TCALL-OPCODE-LOCAL : ;YYY
         plop("C TCALL-LOCAL")
@@ -1062,7 +1084,7 @@ public defn encode (fid:Int, func:VMFunction,
         plop("MISSING C OPCODE %_" % [opcode])
 
   defn emit-ins-c (opcode:Int, x:Label, y:Int, value:Int) :
-    add(covered, opcode)
+    trace-opcode(opcode)
     defn do-reserve (size:Gp, num-locals:Int) :
       mov(a, tmp2(), heap-top())
       add(a, tmp2(), size)
@@ -1093,7 +1115,7 @@ public defn encode (fid:Int, func:VMFunction,
         do-reserve(CONST(rbx(), value), y)
 
   defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Label) :
-    add(covered, opcode)
+    trace-opcode(opcode)
     switch(opcode) :
       JUMP-REG-OPCODE : ;YYY
         val reg = x
@@ -1121,7 +1143,7 @@ public defn encode (fid:Int, func:VMFunction,
     z
 
   defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Int) :
-    add(covered, opcode)
+    trace-opcode(opcode)
     defn do-alloc (type:Int, num-bytes:Gp) :
       val top = heap-top() ; TMP1
       mov(a, MemPtr(top, 0, SIZEOF-LONG), CONST(tmp2(), value))
@@ -1615,7 +1637,7 @@ public defn encode (fid:Int, func:VMFunction,
         plop("MISSING C OPCODE %_" % [opcode])
 
   defn emit-ins-d (opcode:Int, x:Int, value:Long) :
-    add(covered, opcode)
+    trace-opcode(opcode)
     switch(opcode) :
       CALLC-OPCODE-WIDE :  ;YYY
         plop("D CALLC-WIDE")
@@ -1640,7 +1662,7 @@ public defn encode (fid:Int, func:VMFunction,
         plop("MISSING D OPCODE %_" % [opcode])
 
   defn emit-ins-e (opcode:Int, x:Int, y:Int, z:Int, value:Int) :
-    add(covered, opcode)
+    trace-opcode(opcode)
     switch(opcode) :
       STORE-OPCODE-1 : ;YYY
         plop("E STORE-1 X %_ VALUE %_ Z %_" % [x, value, z])
@@ -1721,7 +1743,7 @@ public defn encode (fid:Int, func:VMFunction,
     jump-op-xmm(LOCAL-DOUBLE(xmm0(), x), LOCAL-DOUBLE(xmm1(), y), f, ucomisd, n1, n2)
     
   defn emit-ins-f (opcode:Int, x:Int, y:Int, n1:Label, n2:Label) :
-    add(covered, opcode)
+    trace-opcode(opcode)
     switch(opcode) :
       JUMP-TAGBITS-OPCODE :
         plop("F JUMP-TAGBITS")
