@@ -165,6 +165,9 @@ defn vmstate-reg (a:Assembler, dst:Gp, offset:Int) -> Gp :
 defn vmstate-reg (a:Assembler, offset:Int) -> Gp :
   vmstate-reg(a, rax(), offset)
 
+defn set-vmstate-reg (a:Assembler, offset:Int, value:Gp) :
+  mov(a, MemPtr(vmstate(), offset, SIZEOF-LONG), value)
+
 defn vmstate () :        r8()
 defn registers () :      r9()
 defn stack-pointer () :  r10()
@@ -442,6 +445,7 @@ public defn encode (fid:Int, func:VMFunction,
   defn data-mem () :       vmstate-reg(a, VMSTATE-DATA-MEM-OFFSET)
   defn const-table () :    vmstate-reg(a, VMSTATE-CONST-TABLE-OFFSET)
   defn const-mem () :      vmstate-reg(a, VMSTATE-CONST-MEM-OFFSET)
+  ; defn set-heap-top (value:Gp) : set-vmstate-reg(a, VMSTATE-HEAP-TOP-OFFSET, value)
 
   ;Encode instructions into this byte buffer
   ;TODO: REMOVE
@@ -492,7 +496,7 @@ public defn encode (fid:Int, func:VMFunction,
     dst
   defn SET-REG (r:Int, v:Gp) :
     mov(a, MemPtr(registers(), CONST(rbx(), r), 3, 0, SIZEOF-LONG), v)
-    debug(a, "SET-REG %d %llx\n", CONST(rbx(), r), v)
+    debug(a, "SET-REG[%d] %llx\n", CONST(rbx(), r), v)
     ; dump-memory-64(a, registers(), 5L)
     ; registers[r] = v
     false
@@ -619,7 +623,6 @@ public defn encode (fid:Int, func:VMFunction,
     pop(a, r10())
     
   defn do-tcall (f:Gp) :
-    debug(a, "CALLING %d\n", f)
     mov(a, tmp2(), MemPtr(functions(), f, 3, 0, SIZEOF-LONG))
     debug(a, "CALLING %d %llx\n", f, tmp2())
     jmp(a, tmp2())
@@ -742,14 +745,12 @@ public defn encode (fid:Int, func:VMFunction,
         val tgts = new-label(a)
         read-dispatch-table(a, vmstate(), CONST(tmp1(), value))
         mov(a, tmp3(), rax())
-        debug(a, "DISPATCH-TABLE %lld %llx\n" tmp3(), tmp1())
+        ; debug(a, "DISPATCH-TABLE %lld %llx\n" tmp3(), tmp1())
         cmp(a, tmp3(), CONST(tmp1(), 2)) ; < 2 are targets and >= 2 are methods to goto
         jge(a, code-label)
-        debug(a, "DISPATCH LABELS\n")
         lea(a, tmp2(), MemPtr(tgts, 0, SIZEOF-LONG))
-        debug(a, "DISPATCH LABELS %llx\n" tmp2())
         mov(a, tmp2(), MemPtr(tmp2(), tmp3(), 3, 0, SIZEOF-LONG))
-        debug(a, "DISPATCHED %lld %llx\n", tmp3(), tmp2())
+        debug(a, "DISPATCH LABELS %lld %llx\n", tmp3(), tmp2())
         jmp(a, tmp2())
         bind(a, code-label)
         mov(a, tmp2(), MemPtr(functions(), tmp3(), 3, -2 * SIZEOF-LONG, SIZEOF-LONG))
@@ -839,8 +840,7 @@ public defn encode (fid:Int, func:VMFunction,
       CONV-OPCODE-BYTE-DOUBLE : ;YYY
         println("B CONV-BYTE-DOUBLE")
         cvtsd2si(a, tmp1(), LOCAL-DOUBLE(xmm0(), value))
-        and-op(a, tmp1(), 0xff)
-        SET-LOCAL(x, tmp1())
+        SET-LOCAL-BYTE(x, tmp1())
       CONV-OPCODE-INT-BYTE : ;YYY
         println("B CONV-INT-BYTE")
         xor-op(a, tmp1(), tmp1())
@@ -1000,13 +1000,11 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, rax())
       SET-REG-OPCODE-LOCAL : ;YYY
         println("C SET-REG-LOCAL")
-        debug(a, "SET-REG-LOCAL %d\n", CONST(x))
         SET-REG(x, LOCAL(value))
       SET-REG-OPCODE-UNSIGNED : ;YYY
         println("C SET-REG-UNSIGNED")
         mov(a, tmp1(), to-long(value))
         mov(a, tmp2(), to-long(x))
-        debug(a, "SET-REG-UNSIGNED %llx %llx\n" tmp2() tmp1())
         mov(a, tmp1(), to-long(value))
         SET-REG(x, tmp1())
         ; debug(a, "REGISTERS:\n")
@@ -1080,17 +1078,15 @@ public defn encode (fid:Int, func:VMFunction,
         mov(a, tmp2(), MemPtr(const-table(), CONST(tmp1(), value), 3, 0, SIZEOF-LONG))
         debug(a, "SET-CONST %d %llx\n", CONST(tmp1(), value), tmp2())
         SET-LOCAL(x, tmp2())
-        dump-memory-64(a, const-table(), 10L)
       else :
         println("MISSING C OPCODE %_" % [opcode])
 
   defn emit-ins-c (opcode:Int, x:Label, y:Int, value:Int) :
     add(covered, opcode)
     defn do-reserve (size:Gp, num-locals:Int) :
-      debug(a, "RESERVE SIZE %llx LIMIT %llx\n", size, heap-limit())
       mov(a, tmp2(), heap-top())
       add(a, tmp2(), size)
-      debug(a, "  CMP DESIRED %llx LIMIT %llx\n", tmp2(), heap-limit())
+      debug(a, "RESERVE SIZE %llx DESIRED %llx LIMIT %llx\n", size, tmp2(), heap-limit())
       cmp(a, tmp2(), heap-limit())
       jle(a, x)
       debug(a, "EXTENDING HEAP\n")
@@ -1290,12 +1286,11 @@ public defn encode (fid:Int, func:VMFunction,
         println("C NE-INT")
         val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-ne)
         SET-LOCAL(x, res)
-        debug(a, "NE-INT %llx\n", res)
-        debug(a, "NE-INT ARGS %llx %llx\n", LOCAL(tmp1(), y), LOCAL(tmp2(), value))
+        debug(a, "NE-INT(%llx %llx) -> %llx\n", LOCAL(tmp1(), y), LOCAL(tmp2(), value), res)
       NE-OPCODE-LONG : ;YYY
         println("C NE-LONG")
         val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-ne)
-        debug(a, "NE-LONG %llx\n", res)
+        debug(a, "NE-LONG -> %llx\n", res)
         SET-LOCAL(x, res)
       NE-OPCODE-FLOAT : ;YYY
         println("C NE-FLOAT")
@@ -1679,21 +1674,21 @@ public defn encode (fid:Int, func:VMFunction,
       STORE-OPCODE-1 : ;YYY
         println("E STORE-1 X %_ VALUE %_ Z %_" % [x, value, z])
         LOCAL(tmp1(), x), CONST(tmp2(), value)
-        debug(a, "STORE-1 %llx %d: " tmp1() tmp2())
+        debug(a, "STORE-1 %llx[%d] = " tmp1() tmp2())
         LOCAL(tmp1(), z)
         debug(a, "%llx\n" tmp1())
         mov(a, MemPtr(LOCAL(tmp1(), x), CONST(tmp2(), value), 0, 0, SIZEOF-BYTE), LOCAL(al(), z))
       STORE-OPCODE-4 : ;YYY
         println("E STORE-4 X %_ VALUE %_ Z %_" % [x, value, z])
         LOCAL(tmp1(), x), CONST(tmp2(), value)
-        debug(a, "STORE-4 %llx %d: " tmp1() tmp2())
+        debug(a, "STORE-4 %llx[%d] = " tmp1() tmp2())
         LOCAL(tmp1i(), z)
         debug(a, "%llx\n" tmp1())
         mov(a, MemPtr(LOCAL(tmp1(), x), CONST(tmp2(), value), 0, 0, SIZEOF-INT), LOCAL(eax(), z))
       STORE-OPCODE-8 : ;YYY
         println("E STORE-8 X %_ VALUE %_ Z %_" % [x, value, z])
         LOCAL(tmp1(), x), CONST(tmp2(), value)
-        debug(a, "STORE-8 %llx %d: " tmp1() tmp2())
+        debug(a, "STORE-8 %llx[%d] = " tmp1() tmp2())
         LOCAL(tmp1(), z)
         debug(a, "%llx\n" tmp1())
         mov(a, MemPtr(LOCAL(tmp1(), x), CONST(tmp2(), value), 0, 0, SIZEOF-LONG), LOCAL(rax(), z))
@@ -1710,18 +1705,20 @@ public defn encode (fid:Int, func:VMFunction,
       LOAD-OPCODE-1 :  ;YYY
         println("D LOAD-1 X %_ Y %_ VALUE %_" % [x, y, value])
         mov(a, tmp3(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-BYTE))
-        debug(a, "LOAD-1 %llx %llx: ", LOCAL(tmp1(), y), CONST(tmp2(), value))
+        debug(a, "LOAD-1 %llx[%] -> ", LOCAL(tmp1(), y), CONST(tmp2(), value))
         debug(a, "%llx\n", tmp3())
         SET-LOCAL-BYTE(x, tmp3())
       LOAD-OPCODE-4 :  ;YYY
         println("D LOAD-4 X %_ Y %_ VALUE %_" % [x, y, value])
-        debug(a, "LOAD-4 %llx %llx\n", LOCAL(tmp1(), y), CONST(tmp2(), value))
+        debug(a, "LOAD-4 %llx[%d] -> ", LOCAL(tmp1(), y), CONST(tmp2(), value))
         mov(a, tmp2(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-INT))
+        debug(a, "%llx\n", tmp2())
         SET-LOCAL-INT(x, tmp2())
       LOAD-OPCODE-8 : ;YYY
         println("D LOAD-8 X %_ Y %_ VALUE %_" % [x, y, value])
-        debug(a, "LOAD-8 %llx %llx\n", LOCAL(tmp1(), y), CONST(tmp2(), value))
+        debug(a, "LOAD-8 %llx[%d] -> ", LOCAL(tmp1(), y), CONST(tmp2(), value))
         mov(a, tmp2(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-LONG))
+        debug(a, "%llx\n", tmp2())
         SET-LOCAL(x, tmp2())
       LOAD-OPCODE-1-VAR-OFFSET : ;YYY
         println("E LOAD-1-VAR-OFFSET")
