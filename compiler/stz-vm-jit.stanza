@@ -1644,65 +1644,59 @@ public defn encode (fid:Int, func:VMFunction,
     switch(opcode) :
       STORE-OPCODE-1 : ;YYY
         plop("E STORE-1 X %_ VALUE %_ Z %_" % [x, value, z])
-        LOCAL(tmp1(), x), CONST(tmp2(), value)
-        debug(a, "STORE-1 %llx[%d] = " tmp1() tmp2())
-        LOCAL(tmp1(), z)
-        debug(a, "%llx\n" tmp1())
         mov(a, MemPtr(LOCAL(tmp1(), x), CONST(tmp2(), value), 0, 0, SIZEOF-BYTE), LOCAL(al(), z))
+        debug(a, "STORE-1 %llx[%d] = %llx\n" tmp1() tmp2(), rax())
       STORE-OPCODE-4 : ;YYY
         plop("E STORE-4 X %_ VALUE %_ Z %_" % [x, value, z])
-        LOCAL(tmp1(), x), CONST(tmp2(), value)
-        debug(a, "STORE-4 %llx[%d] = " tmp1() tmp2())
-        LOCAL(tmp1i(), z)
-        debug(a, "%llx\n" tmp1())
         mov(a, MemPtr(LOCAL(tmp1(), x), CONST(tmp2(), value), 0, 0, SIZEOF-INT), LOCAL(eax(), z))
+        debug(a, "STORE-4 %llx[%d] = %llx\n" tmp1() tmp2(), rax())
       STORE-OPCODE-8 : ;YYY
         plop("E STORE-8 X %_ VALUE %_ Z %_" % [x, value, z])
-        LOCAL(tmp1(), x), CONST(tmp2(), value)
-        debug(a, "STORE-8 %llx[%d] = " tmp1() tmp2())
-        LOCAL(tmp1(), z)
-        debug(a, "%llx\n" tmp1())
         mov(a, MemPtr(LOCAL(tmp1(), x), CONST(tmp2(), value), 0, 0, SIZEOF-LONG), LOCAL(rax(), z))
+        debug(a, "STORE-8 %llx[%d] = %llx\n" tmp1() tmp2(), rax())
       STORE-OPCODE-1-VAR-OFFSET : ;YYY
         plop("E STORE-1-VAR-OFFSET")
         mov(a, MemPtr(LOCAL(tmp1(), x), LOCAL(tmp2(), y), 0, value, SIZEOF-BYTE), LOCAL(al(), z))
+        debug(a, "STORE-1* %llx[%d] = %llx\n", tmp1(), tmp2(), rax())
       STORE-OPCODE-4-VAR-OFFSET : ;YYY
         plop("E STORE-4-VAR-OFFSET")
         mov(a, MemPtr(LOCAL(tmp1(), x), LOCAL(tmp2(), y), 0, value, SIZEOF-INT), LOCAL(eax(), z))
-        debug(a, "STORE-4-VAR-OFFSET %llx %llx\n", tmp1(), tmp2())
+        debug(a, "STORE-4* %llx[%d] = %llx\n", tmp1(), tmp2(), rax())
       STORE-OPCODE-8-VAR-OFFSET : ;YYY
         plop("E STORE-8-VAR-OFFSET")
-        mov(a, MemPtr(LOCAL(tmp1(), x), LOCAL(tmp2(), y), 0, value, SIZEOF-LONG), LOCAL(rax(), z))
+        mov(a, MemPtr(LOCAL(tmp1(), x), LOCAL(tmp2(), y), 0, value, SIZEOF-LONG), LOCAL(tmp3(), z))
+        debug(a, "STORE-8* %llx[%d] = %llx\n", tmp1(), tmp2(), tmp3())
       LOAD-OPCODE-1 :  ;YYY
         plop("D LOAD-1 X %_ Y %_ VALUE %_" % [x, y, value])
         mov(a, tmp3(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-BYTE))
-        debug(a, "LOAD-1 %llx[%] -> ", LOCAL(tmp1(), y), CONST(tmp2(), value))
-        debug(a, "%llx\n", tmp3())
+        debug(a, "LOAD-1 %llx[%] -> %llx\n", LOCAL(tmp1(), y), CONST(tmp2(), value), tmp3())
         SET-LOCAL-BYTE(x, tmp3())
       LOAD-OPCODE-4 :  ;YYY
         plop("D LOAD-4 X %_ Y %_ VALUE %_" % [x, y, value])
-        debug(a, "LOAD-4 %llx[%d] -> ", LOCAL(tmp1(), y), CONST(tmp2(), value))
-        mov(a, tmp2(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-INT))
-        debug(a, "%llx\n", tmp2())
-        SET-LOCAL-INT(x, tmp2())
+        mov(a, tmp3(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-INT))
+        debug(a, "LOAD-4 %llx[%d] -> %llx\n", tmp1(), tmp2(), tmp3())
+        SET-LOCAL-INT(x, tmp3())
       LOAD-OPCODE-8 : ;YYY
         plop("D LOAD-8 X %_ Y %_ VALUE %_" % [x, y, value])
-        debug(a, "LOAD-8 %llx[%d] -> ", LOCAL(tmp1(), y), CONST(tmp2(), value))
-        mov(a, tmp2(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-LONG))
-        debug(a, "%llx\n", tmp2())
-        SET-LOCAL(x, tmp2())
+        mov(a, tmp3(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-LONG))
+        debug(a, "LOAD-8 %llx[%d] -> %llx\n", tmp1(), tmp2(), tmp3())
+        SET-LOCAL(x, tmp3())
       LOAD-OPCODE-1-VAR-OFFSET : ;YYY
         plop("E LOAD-1-VAR-OFFSET")
+        xor-op(a, tmp3(), tmp3())
         mov(a, tmp3(), MemPtr(LOCAL(tmp2(), y), LOCAL(tmp1(), z), 0, value, SIZEOF-BYTE))
+        debug(a, "LOAD-1* %llx[%d] -> %llx\n", tmp2(), tmp1(), tmp3())
         SET-LOCAL-BYTE(x, tmp3())
       LOAD-OPCODE-4-VAR-OFFSET : ;YYY
         plop("E LOAD-4-VAR-OFFSET X %_ Y %_ Z %_ VALUE %_" % [x, y, z, value])
+        xor-op(a, tmp3(), tmp3())
         mov(a, tmp3(), MemPtr(LOCAL(tmp2(), y), LOCAL(tmp1(), z), 0, value, SIZEOF-INT))
-        debug(a, "LOAD-4-VAR-OFFSET %llx %llx\n", tmp2(), tmp1())
+        debug(a, "LOAD-4* %llx[%d] -> %llx\n", tmp2(), tmp1(), tmp3())
         SET-LOCAL-INT(x, tmp3())
       LOAD-OPCODE-8-VAR-OFFSET : ;YYY
         plop("E LOAD-8-VAR-OFFSET")
         mov(a, tmp3(), MemPtr(LOCAL(tmp2(), y), LOCAL(tmp1(), z), 0, value, SIZEOF-LONG))
+        debug(a, "LOAD-8* %llx[%d] -> %llx\n", tmp2(), tmp1(), tmp3())
         SET-LOCAL(x, tmp3())
       else :
         plop("MISSING E OPCODE %_" % [opcode])
@@ -2063,6 +2057,10 @@ public defn encode (fid:Int, func:VMFunction,
         label-table[n] = new-label(a)
       label-table[n]
       
+    defn before-call-trace (info:False|FileInfo) :
+      match(info:FileInfo) :
+        debug(a, ">>> %s\n", CONST(tmp1(), printf-format(to-string(info))))
+
     ;Encode each instruction
     defn emit-ins (ins:VMIns) :
       match(ins) :
@@ -2080,12 +2078,14 @@ public defn encode (fid:Int, func:VMFunction,
           emit-ins-a(TCALL-CLOSURE-OPCODE, to-local(f(ins), 0))
         (ins:CallIns) :
           set-regs(ys(ins))
+          before-call-trace(info(ins))
           emit-ins-c(call-opcode(f(ins)), num-locals, to-function-local(f(ins)))
           record-info(info(ins))
           emit-ins-a(POP-FRAME-OPCODE, num-locals)
           get-regs(xs(ins))
         (ins:CallClosureIns) :
           set-regs(ys(ins))
+          before-call-trace(info(ins))
           emit-ins-c(CALL-CLOSURE-OPCODE, num-locals, to-local(f(ins), 0))
           record-info(info(ins))
           emit-ins-a(POP-FRAME-OPCODE, num-locals)
@@ -2134,6 +2134,7 @@ public defn encode (fid:Int, func:VMFunction,
           set-reg(num-int-args-index, NumConst(num-int-args(records) + 1))
           set-reg(num-floats-in-call-index, NumConst(num-real-args(records)))
           ;Call function
+          before-call-trace(info(ins))
           match(f(ins)) :
             (f:Local) :
               emit-ins-c(CALLC-OPCODE-LOCAL, num-locals, slot(f))

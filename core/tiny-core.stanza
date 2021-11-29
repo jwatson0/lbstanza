@@ -76,14 +76,14 @@ protected lostanza defn cast-error (type:ref<Type>, obj:ref<?>, ctxt:int) -> ref
 protected defn variable-uninitialized-error (name:String|False) -> Void : fatal("VUE")
 protected lostanza defn invalid-return-error () -> ref<Void> : return fatal(String("IRE"))
 protected lostanza defn void-tuple (n:long) -> ref<Tuple> : return new Tuple{n}
-; protected lostanza defn initialize-constants () -> ref<False> : return false
+protected lostanza defn initialize-constants () -> ref<False> : return false
 lostanza defn extend-heap (size:long) -> long : return 0
 lostanza defn extend-stack (size:long) -> long : return 0
 lostanza defn print-stack-trace (stack:ref<Stack>) -> ref<False> : return false
 lostanza defn collect-garbage (size:long) -> long : return 0
 lostanza defn class-name (x:int) -> ptr<byte> : return ""
 public lostanza defn String (chars:ptr<byte>) -> ref<String> : return new String{1, 0}
-defn execute-toplevel-command (f:() -> False) -> True|False : false
+defn execute-toplevel-command (f:() -> False) -> True|False : f()
 
 ;;; APP
 
@@ -92,9 +92,9 @@ defn execute-toplevel-command (f:() -> False) -> True|False : false
 protected extern printf: (ptr<byte>, ? ...) -> int
 protected extern memcpy: (ptr<?>, ptr<?>, long) -> ptr<?>
  
-defn minus (a:Int, b:Int) -> Int : ($prim sub a b)
-defn plus (a:Int, b:Int) -> Int : ($prim add a b)
-defn equal? (a:Int, b:Int) -> True|False : ($prim eq a b)
+public defn minus (a:Int, b:Int) -> Int : ($prim sub a b)
+public defn plus (a:Int, b:Int) -> Int : ($prim add a b)
+public defn equal? (a:Int, b:Int) -> True|False : ($prim eq a b)
 defn byte-equal? (a:Byte, b:Byte) -> True|False :
   ($prim identical? a b)
 defn char-equal? (a:Char, b:Char) -> True|False :
@@ -102,7 +102,7 @@ defn char-equal? (a:Char, b:Char) -> True|False :
 lostanza defn long-equal? (a:ref<Long>, b:ref<Long>) -> ref<True|False> :
   if a.value == b.value : return true
   else : return false
-defn greater? (a:Int, b:Int) -> True|False : ($prim gt a b)
+public defn greater? (a:Int, b:Int) -> True|False : ($prim gt a b)
 
 public defn complement (a:True|False) -> True|False :
   if a : false
@@ -115,6 +115,10 @@ var num-errors:Int = 0
 
 defn inc-errors () :
   num-errors = num-errors + 1
+
+public lostanza defn plop (x:ref<Int>) -> ref<False> :
+  call-c printf("DUMP: %d\n", x.value)
+  return false
 
 lostanza defn dump (msg:ptr<byte>) -> ref<False> :
   call-c printf(msg)
@@ -888,183 +892,6 @@ lostanza defn report-errors () -> ref<False> :
 ; ; 
 ; ; jump-tests()
 
-protected lostanza deftype VMState :
-  ;Permanent State
-  ;Changes in-between each code load
-  instructions: ptr<byte>
-  registers: ptr<long>
-  global-offsets: ptr<long>
-  global-mem: ptr<byte>
-  const-table: ptr<long>
-  const-mem: ptr<byte>
-  data-offsets: ptr<int>
-  data-mem: ptr<byte>
-  code-offsets: ptr<int>
-  ;Variable State
-  ;Changes in-between each boundary change
-  var heap: ptr<long>
-  var heap-top: ptr<long>
-  var heap-limit: ptr<long>
-  var free: ptr<long>
-  var free-limit: ptr<long>
-  var current-stack: long
-  ;Need for system stubs
-  var system-stack: long
-  system-registers: ptr<long>
-
-lostanza var const-ptr:ptr<?>
-lostanza val BYTE-CONST-TAG : int = 0
-lostanza val CHAR-CONST-TAG : int = 1
-lostanza val INT-CONST-TAG : int = 2
-lostanza val LONG-CONST-TAG : int = 3
-lostanza val FLOAT-CONST-TAG : int = 4
-lostanza val DOUBLE-CONST-TAG : int = 5
-lostanza val TRUE-CONST-TAG : int = 6
-lostanza val FALSE-CONST-TAG : int = 7
-lostanza val LIST-CONST-TAG : int = 8
-lostanza val STRING-CONST-TAG : int = 9
-lostanza val SYMBOL-CONST-TAG : int = 10
-lostanza val TYPE-CONST-TAG : int = 11
-lostanza val FN-CONST-TAG : int = 12
-lostanza val INTERNED-CONST-TAG : int = 13
-lostanza var initialized-symbol-table? : long = 0L
-lostanza var consts-top : long = 4L
-lostanza var num-loaded-consts : long = 0L
-
-public lostanza defn String (len:long) -> ref<String> :
-  return new String{len + 1, 0}
-
-public lostanza defn String (len:long, chars:ptr<byte>) -> ref<String> :
-  return initialize(String(len), chars)
-
-public lostanza defn initialize (s:ref<String>, chars:ptr<byte>) -> ref<String> :
-  val l = s.length - 1
-  call-c memcpy(addr!(s.chars), chars, l)
-  s.chars[l] = 0Y
-  return s
-
-protected lostanza defn initialize-constants () -> ref<False> :
-  call-c clib/printf("=== INITIALIZING CONSTANTS ===\n")
-  ;Initialize read pointer to beginning of the constant table
-  ;[num, constants ...]
-  val vms:ptr<VMState> = call-prim flush-vm()
-  val consts-data = vms.const-mem
-
-  ;Read total number of constants
-  const-ptr = consts-data
-  val n-consts = read-const-int()
-
-  ;Populate constants vector
-  const-ptr = consts-data + consts-top
-  var cs:ptr<ref<?>> = vms.const-table as ptr<ref<?>>
-  call-c clib/printf("LOADING %d CONSTS\n", n-consts)
-  while num-loaded-consts < n-consts :
-    val c = read-const(vms)
-    call-c clib/printf("LOADING CONST %d %llx\n", num-loaded-consts, c)
-    cs[num-loaded-consts] = c
-    num-loaded-consts = num-loaded-consts + 1
-
-  ;Set new top
-  consts-top = const-ptr - consts-data
-  call-c clib/printf("=== DONE INITIALIZING CONSTANTS ===\n")
-  return false
-
-lostanza defn read-const (vms:ptr<VMState>) -> ref<?> :
-  val tag = read-const-int()
-  call-c printf("+++ TAG %d\n", tag)
-  if tag == BYTE-CONST-TAG :
-    return new Byte{read-const-byte()}
-  else if tag == CHAR-CONST-TAG :
-    return new Char{read-const-byte()}
-  else if tag == INT-CONST-TAG :
-    return new Int{read-const-int()}
-  else if tag == LONG-CONST-TAG :
-    return new Long{read-const-long()}
-  else if tag == FLOAT-CONST-TAG :
-    return new Float{read-const-float()}
-  else if tag == DOUBLE-CONST-TAG :
-    return new Double{read-const-double()}
-  else if tag == TRUE-CONST-TAG :
-    return true
-  else if tag == FALSE-CONST-TAG :
-    return false
-  else if tag == LIST-CONST-TAG :
-    val len = read-const-int()
-    return read-const-list(len, vms)
-  else if tag == STRING-CONST-TAG :
-    val len = read-const-int()
-    val chars = read-const-chars(len)
-    return String(len, chars)
-  else if tag == SYMBOL-CONST-TAG :
-    val len = read-const-int()
-    val chars = read-const-chars(len)
-    val str = String(len, chars)
-    ; if initialized-symbol-table? : return to-symbol(str)
-    ; else :
-    return new StringSymbol{str}
-  else if tag == TYPE-CONST-TAG :
-    val code = read-const-long() as ptr<?>
-    return new Type{0, code}
-  else if tag == FN-CONST-TAG :
-    val code = read-const-long() as ptr<?>
-    return new Fn{0, code}
-  else if tag == INTERNED-CONST-TAG :
-    val i = read-const-int()
-    val cs = vms.const-table as ptr<ref<?>>
-    return cs[i]
-  else :
-    return false
-    ; call-c clib/printf("Unknown constant tag: %d\n", tag)
-    ; return fatal("Unknown constant tag")
-
-lostanza defn read-const-list (n:int, vms:ptr<VMState>) -> ref<List> :
-  if n == 0 : return new NilList{}
-  else : return new FullList{read-const(vms), read-const-list(n - 1, vms)}
-
-lostanza defn read-const-byte () -> byte :
-  val value = [const-ptr as ptr<byte>]
-  const-ptr = const-ptr + sizeof(byte)
-  return value
-
-lostanza defn read-const-int () -> int :
-  val value = [const-ptr as ptr<int>]
-  const-ptr = const-ptr + sizeof(int)
-  return value
-
-lostanza defn read-const-long () -> long :
-  val value = [const-ptr as ptr<long>]
-  const-ptr = const-ptr + sizeof(long)
-  return value
-
-lostanza defn read-const-float () -> float :
-  val value = [const-ptr as ptr<float>]
-  const-ptr = const-ptr + sizeof(float)
-  return value
-
-lostanza defn read-const-double () -> double :
-  val value = [const-ptr as ptr<double>]
-  const-ptr = const-ptr + sizeof(double)
-  return value
-
-lostanza defn read-const-chars (len:long) -> ptr<byte> :
-  val value = const-ptr as ptr<byte>
-  ;length chars + pad to nearest 4 bytes
-  val n = (len + 3) & -4
-  const-ptr = (const-ptr + n) as ptr<?>
-  return value
-
-initialize-constants()
-
-lostanza defn dumper (s:ref<String>) -> ref<False> :
-  dump(addr!(s.chars))
-  return false
-
-defn do-the-deed () : 
-  dumper("---=== ABC ===---\n")
-
-do-the-deed()
-do-the-deed()
-
 ; ; BIG MULTI DISPATCH
 ; 
 ; lostanza defn f15 () -> ref<False> :
@@ -1115,3 +942,13 @@ do-the-deed()
 ; big-multi-methods-test()
 
 report-errors()
+
+defpackage math :
+   import core
+
+public lostanza val PI:ref<Double> = new Double{3.141592653589793}
+
+defpackage collections :
+  import core
+
+deftype Sentinel
