@@ -496,13 +496,10 @@ public defn encode (fid:Int, func:VMFunction,
     dst
   defn SET-REG (r:Int, v:Gp) :
     mov(a, MemPtr(registers(), CONST(rbx(), r), 3, 0, SIZEOF-LONG), v)
-    debug(a, "SET-REG[%d] %llx\n", CONST(rbx(), r), v)
-    ; dump-memory-64(a, registers(), 5L)
+    debug(a, "SET-REG[%d] = %llx\n", CONST(rbx(), r), v)
     ; registers[r] = v
     false
   defn SET-LOCAL (l:Int, v:Gp) :
-    ; debug(a, "SET-LOCAL SLOTS %llx\n" stack-frame-slots())
-    ; mov(a, MemPtr(stack-frame-slots(rbx()), CONST(rsi(), l), 3, 0, SIZEOF-LONG), v)
     mov(a, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG), v)
     debug(a, "SET-LOCAL[%d] %llx\n", CONST(rbx(), l), v)
     ; stack_pointer->slots[l] = v;
@@ -521,19 +518,12 @@ public defn encode (fid:Int, func:VMFunction,
     movsx(a, v, v)
     SET-LOCAL(l, v)
   defn SET-LOCAL-FLOAT (l:Int,v:Xmm) :
-    ; mov(a, tmp1(), v)
-    ; debug(a, "SET-LOCAL-FLOAT %llx\n", tmp1())
-    ; mov(a, MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG), tmp1())
-    ; movss(a, MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG), v)
     movsd(a, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG), v)
     debug(a, "SET-LOCAL-FLOAT[%d] %llx\n", CONST(rbx(), l), LOCAL(tmp1(), l))
     ; float* addr = (float*)&(stack_pointer->slots[l])
     ; *addr = v
     false
   defn SET-LOCAL-DOUBLE (l:Int, v:Xmm) :
-    ; mov(a, tmp1(), v)
-    ; debug(a, "SET-LOCAL-DOUBLE %llx\n", tmp1())
-    ; mov(a, MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG), tmp1())
     movsd(a, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG), v)
     ; double* addr = (double*)&(stack_pointer->slots[l])
     ; *addr = v
@@ -547,23 +537,14 @@ public defn encode (fid:Int, func:VMFunction,
    ; stack_pointer->slots[l]
   defn LOCAL-FLOAT (dst:Xmm, l:Int) -> Xmm :
     movss(a, dst, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-INT))
-    ; mov(a, tmp1(), MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG))
-    ; debug(a, "LOCAL-FLOAT %llx\n" tmp1())
-    ; mov(a, dst, tmp1()) 
-    ; mov(a, tmp2(), dst) 
-    ; debug(a, "LOCAL-FLOAT TMP2 %llx\n" tmp2())
     dst
-    ; TODO: float register
     ; float* addr = (float*)&(stack_pointer->slots[l])
     ; *addr
   defn LOCAL-FLOAT (l:Int) -> Xmm :
     LOCAL-FLOAT(xmm0(), l)
   defn LOCAL-DOUBLE (dst:Xmm, l:Int) -> Xmm :
     movsd(a, dst, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG))
-    ; mov(a, tmp1(), MemPtr(stack-frame-slots(rbx()), l * SIZEOF-LONG, SIZEOF-LONG))
-    ; mov(a, dst, tmp1()) 
     dst
-    ; TODO: double register
     ; double* addr = (double*)&(stack_pointer->slots[l])
     ; *addr
   defn LOCAL-DOUBLE (l:Int) -> Xmm :
@@ -951,7 +932,6 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, call-print-stack-trace(a, vmstate(), LOCAL(tmp1(), value)))
       GET-REG-OPCODE : ;YYY
         println("B GET-REG %_ %_" % [x value])
-        debug(a, "GET-REG %d %llx\n" CONST(tmp2(), value) GET-REG(tmp1(), value))
         SET-LOCAL(x, GET-REG(tmp1(), value))
       else :
         println("MISSING B OPCODE %_" % [opcode])
@@ -1022,22 +1002,13 @@ public defn encode (fid:Int, func:VMFunction,
         SET-REG(x, tmp1())
       SET-REG-OPCODE-DATA : ;YYY
         println("C SET-REG-DATA x=%_ value=%_" % [x, value])
-        ; debug(a, "VMSTATE:\n")
-        ; dump-memory-64(a, vmstate(), 17L)
-        ; debug(a, "OFFSETS %llx\n", data-offsets())
-        ; dump-memory-32(a, data-offsets(), 8L)
         mov(a, tmp2i(), MemPtr(data-offsets(), CONST(tmp1(), value), 2, 0, SIZEOF-INT)) ; data_offsets[value]
         lea(a, tmp1(), MemPtr(data-mem(), tmp2i(), 3, 0, SIZEOF-LONG))
         SET-REG(x, tmp1())
         debug(a, "SET-REG-DATA %x %llx\n" CONST(tmp2(), x) tmp1())
-        ; debug(a, "REGISTERS:\n")
-        ; dump-memory-64(a, registers(), 5L)
-        ; debug(a, "DATA:\n")
-        ; dump-memory-8(a, data-mem(), 64L)
       SET-REG-OPCODE-CONST : ;YYY
         println("C SET-REG-CONST X %_ VALUE %_" % [x, value])
         debug(a, "SET-REG-CONST %d\n", CONST(tmp3(), value))
-        ; dump-memory-64(a, const-table(), 100L)
         mov(a, tmp1(), MemPtr(const-table(), CONST(tmp3(), value), 3, 0, SIZEOF-LONG))
         SET-REG(x, tmp1())
       SET-REG-OPCODE-UNSIGNED : ;YYY
@@ -1298,12 +1269,6 @@ public defn encode (fid:Int, func:VMFunction,
         val res = cmpf-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-ne)
         SET-LOCAL(x, res)
         debug(a, "NE-FLOAT %llx\n", res)
-        ; LOCAL-FLOAT(xmm0(), y)
-        ; LOCAL-FLOAT(xmm1(), value)
-        ; mov(a, rax(), xmm0())
-        ; debug(a, "XMM0 = %llx\n" rax())
-        ; mov(a, rax(), xmm1())
-        ; debug(a, "XMM1 = %llx\n" rax())
       NE-OPCODE-DOUBLE : ;YYY
         println("C NE-DOUBLE")
         val res = cmpd-set(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value), tmp3(), tmp3b(), set-ne)
@@ -1654,9 +1619,6 @@ public defn encode (fid:Int, func:VMFunction,
         debug(a, "CALLC-WIDE %llx\n" tmp1())
         c-trampoline(a, tmp1(), registers(), registers())
         RESTORE-STATE()
-        ; debug(a, "JMP RETURN\n")
-        ; mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG))
-        ; jmp(a, tmp1())
         POP-FRAME(num_locals)
         bind(a, end-label)
       SET-OPCODE-WIDE : ;YYY
@@ -2169,7 +2131,6 @@ public defn encode (fid:Int, func:VMFunction,
             (f:ExternId) :
               val address = to-bits(f) as Long
               emit-ins-d(CALLC-OPCODE-WIDE, num-locals, address)
-          debug(a, "RECORD-INFO\n")
           record-info(info(ins))
           ;Retrieve return registers
           defn return-register-index (l:CallLoc) :
