@@ -422,7 +422,6 @@ lostanza defn alloc-stack (vm:ptr<VMState>) -> long :
 ;============================================================
 
 extern vmloop: (ptr<VMState>, long) -> int   ;void return
-extern vm_start: (ptr<VMState>, long) -> int   ;void return
 
 extern defn retrieve_class_name (vms:ptr<VMState>, id:long) -> ptr<byte> :
   val vm = VIRTUAL-MACHINE as ref<VirtualMachine>
@@ -449,9 +448,8 @@ public lostanza defn run-bytecode (vm:ref<VirtualMachine>, start-func:ref<Int>) 
   VIRTUAL-MACHINE = vm
   register-array = vm.vmstate.registers
   initialize-stack-pointer(vm)
-  ; set-starting-func(vm, start-func)
+  set-starting-func(vm, start-func)
   ; call-c vmloop(vm.vmstate, call-prim crsp() as long)
-  call-c vm_start(vm.vmstate, call-prim crsp() as long)
   val vms = new Long{vm.vmstate as long}
   call-c printf("RUN VMS = %lld\n" vm.vmstate)
   val func = make-jit-launch(jit-runtime(vm), vms, start-func)
@@ -509,7 +507,7 @@ lostanza defn null-stack-pointer (vm:ref<VirtualMachine>) -> ref<False> :
 lostanza defn set-starting-func (vm:ref<VirtualMachine>, fid:ref<Int>) -> ref<False> :
   val pc = get(vm.vmtable.functions,fid).value
   val stk:ptr<Stack> = untag(vm.vmstate.current-stack)
-  stk.pc = pc * 4
+  stk.pc = pc
   return false
 
 ;============================================================
@@ -1121,6 +1119,7 @@ defn class-names (cs:Seqable<VMClass>, ids:VMIds) -> Seqable<KeyValue<Int,String
 
 public defn load (vm:VirtualMachine, vmps:Collection<VMPackage>, keep-existing-globals?:True|False) :
   if not empty?(to-seq(vmps)) :
+    println("--- LOADING VM ---")
     ;Precondition
     ensure-core-loaded-first!(vm, vmps)
 
@@ -1138,10 +1137,17 @@ public defn load (vm:VirtualMachine, vmps:Collection<VMPackage>, keep-existing-g
     val extend-stack-return = make-extend-stack-return(jit-runtime(vm))
     val extend-stack-launch = make-extend-stack-launch(jit-runtime(vm), extend-stack-return)
     for f in funcs(load-unit) do :
-      println("--- ENCODING %_" % [id(f)])
       val ef = encode(id(f), func(f), jit-runtime(vm), encoding-resolver,
                       extend-stack-launch, extend-stack-return, backend(vm))
       load-function(vmt, id(f), ef)
+    val coverage = opcode-coverage()
+    ; val uncovered = IntSet()
+    ; for i in 0 to 256 do :
+    ;   if not coverage[i] and key?(opcode-names, i) :
+    ;     add(uncovered, i)
+    ; println("OPCODE COVERAGE %_/%_:" % [length(uncovered), length(opcode-names)])
+    ; for i in 0 to 256 do :
+    ;     println("  %_" % [opcode-names[i]]) when uncovered[i]
     ;Load all classes into table  
     load-classes(vmt, classes(load-unit))
     load-class-names(vmt, class-names(classes(load-unit), vm-ids))
@@ -1154,6 +1160,8 @@ public defn load (vm:VirtualMachine, vmps:Collection<VMPackage>, keep-existing-g
     ;Update the virtual machine state
     update(branch-table(vm))
     update-vmstate(vm)
+
+    println("--- RUN-BYTECODE %_ ---" % [core-loaded?(vm)])
 
     ;If core has been loaded, then initialize the constants by running
     ;the initialize-constants function.
