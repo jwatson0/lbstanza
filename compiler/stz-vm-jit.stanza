@@ -353,6 +353,7 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
   lea(a, tmp2(), MemPtr(ret-label, 0, SIZEOF-LONG))
   debug(a, "RET-LABEL %llx\n" tmp2())
   mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), tmp2())
+  mov(a, MemPtr(vmstate(), VMSTATE-INSTRUCTIONS-OFFSET, SIZEOF-LONG), CONST(a, tmp1(), 0))
   ; call init
   plop("INIT-ID %_" % [init-id])
   mov(a, rax(), MemPtr(functions(), init-id * SIZEOF-LONG, SIZEOF-LONG))
@@ -367,6 +368,7 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
 defn CONST (a:Assembler, x:Gp, id:Int|Long) -> Gp : (mov(a, x, to-long(id)), x)
 defn SET-REG (a:Assembler, r:Int, v:Gp) :
   mov(a, MemPtr(registers(), r * SIZEOF-LONG, SIZEOF-LONG), v)
+  trace(a, "SET-REG[%d] = %llx\n", CONST(a, rax(), r), v)
 
 defn dump-stack-frame (a:Assembler, sp:Gp) :
   debug(a, "STACK-FRAME:\n")
@@ -523,11 +525,13 @@ public defn encode (fid:Int, func:VMFunction,
   defn SET-REG (r:Int, v:Gp) :
     mov(a, MemPtr(registers(), CONST(rbx(), r), 3, 0, SIZEOF-LONG), v)
     debug(a, "SET-REG[%d] = %llx\n", CONST(rbx(), r), v)
+    ; trace(a, "  SET-REG[%d] = %llx\n", CONST(rbx(), r), v)
     ; registers[r] = v
     false
   defn SET-LOCAL (l:Int, v:Gp) :
     mov(a, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG), v)
-    debug(a, "SET-LOCAL[%d] %llx\n", CONST(rbx(), l), v)
+    debug(a, "  SET-LOCAL[%d] %llx\n", CONST(rbx(), l), v)
+    ; trace(a, "  SET-LOCAL[%d] = %llx\n", CONST(rax(), l), v)
     ; stack_pointer->slots[l] = v;
     false
   defn SET-LOCAL-BYTE (l:Int, v:Gp) :
@@ -641,8 +645,13 @@ public defn encode (fid:Int, func:VMFunction,
     bind(a, end-label)
 
   defn trace-opcode (opcode:Int) :
-    val name = string-join([ opcode-names[opcode] "\n" ])
-    trace(a, name)
+    val name = string-join([ "%d: " opcode-names[opcode] "\n" ])
+    if tracing? :
+      mov(a, tmp3(), vmstate-reg(a, VMSTATE-INSTRUCTIONS-OFFSET))
+    trace(a, name, tmp3())
+    if tracing? :
+      add(a, tmp3(), 1)
+      mov(a, MemPtr(vmstate(), VMSTATE-INSTRUCTIONS-OFFSET, SIZEOF-LONG), tmp3())
     add(covered, opcode)
 
   defn emit-ins-a (opcode:Int, value:Label) :
@@ -1145,8 +1154,11 @@ public defn encode (fid:Int, func:VMFunction,
   defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Int) :
     trace-opcode(opcode)
     defn do-alloc (type:Int, num-bytes:Gp) :
-      val top = heap-top() ; TMP1
+      val top = tmp3()
+      mov(a, top, heap-top())
+      trace(a, "TOP = %llx\n", top)
       mov(a, MemPtr(top, 0, SIZEOF-LONG), CONST(tmp2(), value))
+      trace(a, "TYPE = %llx\n", tmp2())
       SET-LOCAL(x, ptr-to-ref(tmp2(), top))
       add(a, top, num-bytes)
       mov(a, MemPtr(vmstate(), VMSTATE-HEAP-TOP-OFFSET, SIZEOF-LONG), top)
@@ -1624,6 +1636,7 @@ public defn encode (fid:Int, func:VMFunction,
       ALLOC-OPCODE-LOCAL : ;YYY
         plop("C ALLOC-LOCAL X %_ Y %_ VALUE %_" % [x, y, value])
         debug(a, "ALLOC-LOCAL\n")
+        trace(a, "ALLOC-LOCAL\n")
         val num-bytes = tmp3()
         LOCAL(num-bytes, y)
         add(a, num-bytes, 8 + 7)
@@ -2082,6 +2095,7 @@ public defn encode (fid:Int, func:VMFunction,
     defn before-call-trace (info:False|FileInfo) :
       match(info:FileInfo) :
         debug(a, ">>> %s\n", CONST(tmp1(), printf-format(to-string(info))))
+        trace(a, ">>> %s\n", CONST(tmp1(), printf-format(to-string(info))))
 
     ;Encode each instruction
     defn emit-ins (ins:VMIns) :
