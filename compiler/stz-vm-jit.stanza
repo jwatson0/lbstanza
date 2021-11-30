@@ -353,7 +353,7 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
   lea(a, tmp2(), MemPtr(ret-label, 0, SIZEOF-LONG))
   debug(a, "RET-LABEL %llx\n" tmp2())
   mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET, SIZEOF-LONG), tmp2())
-  mov(a, MemPtr(vmstate(), VMSTATE-INSTRUCTIONS-OFFSET, SIZEOF-LONG), CONST(a, tmp1(), 0))
+  ; mov(a, MemPtr(vmstate(), VMSTATE-INSTRUCTIONS-OFFSET, SIZEOF-LONG), CONST(a, tmp1(), 0))
   ; call init
   plop("INIT-ID %_" % [init-id])
   mov(a, rax(), MemPtr(functions(), init-id * SIZEOF-LONG, SIZEOF-LONG))
@@ -525,13 +525,13 @@ public defn encode (fid:Int, func:VMFunction,
   defn SET-REG (r:Int, v:Gp) :
     mov(a, MemPtr(registers(), CONST(rbx(), r), 3, 0, SIZEOF-LONG), v)
     debug(a, "SET-REG[%d] = %llx\n", CONST(rbx(), r), v)
-    ; trace(a, "  SET-REG[%d] = %llx\n", CONST(rbx(), r), v)
+    trace(a, "  SET-REG[%d] = %llx\n", CONST(rbx(), r), v)
     ; registers[r] = v
     false
   defn SET-LOCAL (l:Int, v:Gp) :
     mov(a, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG), v)
     debug(a, "  SET-LOCAL[%d] %llx\n", CONST(rbx(), l), v)
-    ; trace(a, "  SET-LOCAL[%d] = %llx\n", CONST(rax(), l), v)
+    trace(a, "  SET-LOCAL[%d] = %llx\n", CONST(rax(), l), v)
     ; stack_pointer->slots[l] = v;
     false
   defn SET-LOCAL-BYTE (l:Int, v:Gp) :
@@ -1377,9 +1377,13 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL-INT-EXT(x, tmp1())
       MUL-OPCODE-LONG : ;YYY
         plop("C MUL-LONG X %_ Y %_ VALUE %_" % [x, y, value])
-        imul(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
-        debug(a, "MUL-LONG %llx %llx\n", tmp1(), tmp2())
-        SET-LOCAL(x, tmp1())
+        trace(a, "MUL-LONG X %d Y %d VALUE %d\n", CONST(tmp1(), x), CONST(tmp2(), y), CONST(tmp3(), value))
+        LOCAL(tmp1(), y)
+        LOCAL(tmp2(), value)
+        trace(a, "MUL-LONG %llx %llx -> ", tmp1(), tmp2())
+        imul(a, LOCAL(tmp3(), y), LOCAL(tmp2(), value))
+        trace(a, "%llx\n", tmp3())
+        SET-LOCAL(x, tmp3())
       MUL-OPCODE-FLOAT : ;YYY
         plop("C MUL-FLOAT")
         mulss(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
