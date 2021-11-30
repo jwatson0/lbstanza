@@ -1448,7 +1448,7 @@ public defn encode (fid:Int, func:VMFunction,
         plop("C AND-INT")
         and-op(a, LOCAL(tmp1i(), y), LOCAL(tmp2i(), value))
         debug(a, "AND-INT %llx\n" tmp1i())
-        SET-LOCAL(x, tmp1i())
+        SET-LOCAL-INT(x, tmp1())
       AND-OPCODE-LONG : ;YYY
         plop("C AND-LONG")
         and-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
@@ -1461,7 +1461,7 @@ public defn encode (fid:Int, func:VMFunction,
         plop("C OR-INT")
         or-op(a, LOCAL(tmp1i(), y), LOCAL(tmp2i(), value))
         debug(a, "OR-INT %llx\n" tmp1i())
-        SET-LOCAL(x, tmp1i())
+        SET-LOCAL-INT(x, tmp1())
       OR-OPCODE-LONG : ;YYY
         plop("C OR-LONG")
         or-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
@@ -1474,18 +1474,18 @@ public defn encode (fid:Int, func:VMFunction,
       XOR-OPCODE-INT : ;YYY
         plop("C XOR-INT")
         xor-op(a, LOCAL(tmp1i(), y), LOCAL(tmp2i(), value))
-        SET-LOCAL-INT(x, tmp1i())
+        SET-LOCAL-INT(x, tmp1())
       XOR-OPCODE-LONG : ;YYY
         plop("C XOR-LONG")
         xor-op(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         SET-LOCAL(x, tmp1())
       SHL-OPCODE-BYTE : ;YYY
         plop("C SHL-BYTE")
-        shl(a, LOCAL(tmp1b(), y), LOCAL(rcx(), value))
+        shl(a, LOCAL(tmp1(), y), LOCAL(rcx(), value))
         SET-LOCAL-BYTE(x, tmp1())
       SHL-OPCODE-INT : ;YYY
         plop("C SHL-INT")
-        shl(a, LOCAL(tmp1i(), y), LOCAL(rcx(), value))
+        shl(a, LOCAL(tmp1(), y), LOCAL(rcx(), value))
         debug(a, "SHL-INT %llx\n" tmp1())
         SET-LOCAL-INT(x, tmp1())
       SHL-OPCODE-LONG : ;YYY
@@ -1500,7 +1500,7 @@ public defn encode (fid:Int, func:VMFunction,
         plop("C SHR-INT")
         shr(a, LOCAL(tmp1i(), y), LOCAL(rcx(), value))
         debug(a, "SHR-INT %llx\n" tmp1i())
-        SET-LOCAL-INT(x, tmp1i())
+        SET-LOCAL-INT(x, tmp1())
       SHR-OPCODE-LONG : ;YYY
         plop("C SHR-LONG")
         shr(a, LOCAL(tmp1(), y), LOCAL(rcx(), value))
