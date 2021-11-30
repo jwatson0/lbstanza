@@ -10,6 +10,7 @@ defpackage clib
 
 protected extern memcpy: (ptr<?>, ptr<?>, long) -> ptr<?>
 protected extern memset: (ptr<?>, long, long) -> ptr<?>
+protected extern rmdir: (ptr<byte>) -> int
 protected extern remove: (ptr<byte>) -> int
 protected extern rename: (ptr<byte>, ptr<byte>) -> int
 protected extern symlink: (ptr<byte>, ptr<byte>) -> int
@@ -84,6 +85,7 @@ protected extern stz_memory_resize: (ptr<?>, long, long) -> int
   protected extern initialize_launcher_process: () -> int
 protected extern retrieve_process_state: (long, ptr<?>, int) -> int
 
+
 ;Math libraries
 protected extern exp: double -> double
 protected extern log: double -> double
@@ -114,6 +116,7 @@ protected extern round: double -> double
 
 defpackage core :
   import collections
+  import core/stack-trace
 
 ;============================================================
 ;===================== Internal Types =======================
@@ -148,15 +151,13 @@ lostanza deftype StackMap :
   num-roots: int
   roots: int ...
 
-lostanza deftype FileInfoTable :
+lostanza deftype StackTraceTable :
   length: long
-  entries: FileInfoEntry ...
+  entries: StackTraceTableEntry ...
 
-lostanza deftype FileInfoEntry :
+lostanza deftype StackTraceTableEntry :
   lbl: ptr<?>
-  file: ptr<byte>
-  line: int
-  column: int
+  record: StackTraceRecord
 
 lostanza deftype ClassRecord :
   name:ptr<byte>
@@ -200,7 +201,7 @@ protected lostanza deftype VMState :
   class-table: ptr<ptr<ClassRecord>>
   global-root-table: ptr<GlobalRoots>
   stackmap-table: ptr<ptr<StackMap>>
-  info-table: ptr<FileInfoTable>
+  stack-trace-table: ptr<StackTraceTable>
   extern-table: ptr<ExternTable>
   callback-index-table: ptr<ExternDefnTable>
   ;New garbage collector - currently unused
@@ -277,32 +278,13 @@ defn cast-message (t:Type, x, ctxt:Int) :
           t, objt]
 
 ;============================================================
-;=================== Fatal Errors ===========================
+;=================== Stack Traces ===========================
 ;============================================================
 
-public lostanza defn fatal! (msg:ptr<byte>) -> ref<Void> :
-  call-c clib/fflush(stdout)
-  call-c clib/fprintf(current-err, "FATAL ERROR: %s\n", msg)
-  call-c clib/fflush(current-err)
-  print-stack-trace()
-  call-c clib/exit(-1)
-  ;Unreachable
-  return false as ref<?>
-
-public lostanza defn fatal (msg:ptr<byte>) -> ref<Void> :
-  call-c clib/fflush(stdout)
-  call-c clib/fprintf(current-err, "FATAL ERROR: %s\n", msg)
-  print-stack-trace()
-  return halt()
-
-public defn fatal (msg) -> Void :
-  flush(STANDARD-OUTPUT-STREAM as FileOutputStream)
-  print(CURRENT-ERROR-STREAM, "FATAL ERROR: ")
-  println(CURRENT-ERROR-STREAM, msg)
-  print-stack-trace()
-  halt()
-
-public lostanza defn print-stack-trace () -> ref<False> :
+;Function for printing out the stack trace right now.
+;Does not call any GC constructs. Does not obey stack trace
+;filters.
+public lostanza defn print-stack-trace! () -> ref<False> :
   call-prim flush-vm()
   labels :
     begin :
@@ -314,30 +296,117 @@ public lostanza defn print-stack-trace () -> ref<False> :
         (p:ref<False>) : ()
   return false
 
-var EXECUTION-HALT:() -> Void
+;Function for printing out the stack trace during
+;normal operation. Respects the stack trace filter.
+public defn print-stack-trace (o:OutputStream) -> False :
+  val trace = collect-stack-trace()
+  print-stack-trace(o, trace, STACK-TRACE-FILTER)
 
-defn halt () -> Void :
-  EXECUTION-HALT()
+;Function for printing out the stack trace during
+;normal operation. Respects the stack trace filter.
+public defn print-stack-trace () -> False :
+  print-stack-trace(CURRENT-ERROR-STREAM)
 
-defn initialize-launcher () :
-  EXECUTION-HALT = fn () : exit(-1)
+;Collect the stack trace into an object.
+public lostanza defn collect-stack-trace () -> ref<StackTrace> :
+  call-prim flush-vm()  
+  val traces = Vector<SingleStackTrace>()
+  labels :
+    begin: goto loop(current-coroutine)
+    loop (co:ref<RawCoroutine>) :
+      val trace = call-prim collect-stack-trace(co.stack)
+      add(traces, StackTrace(trace))
+      match(co.parent) :
+        (p:ref<RawCoroutine>) : goto loop(p)
+        (p:ref<False>) : ()
+  return append-all(traces)
 
-defn execute-toplevel-command (f:() -> False) -> True|False :
-  label<True|False> return :
-    let-var EXECUTION-HALT = return{false} :
-      f()
-      true
+;============================================================
+;====================== Fatal Errors ========================
+;============================================================
 
-public defn* execute-with-error-handler<?T> (f:() -> ?T, fail:() -> ?T) :
-  val result = label<Maybe<T>> break :
-    defn fail () : break(None())
-    One $ let-var EXECUTION-HALT = fail : f()
-  fail() when empty?(result) else value!(result)
+var ERROR-HANDLER: String -> Void
 
-public defn execute-with-halt-interceptor<?T> (body:() -> ?T, halt-function:() -> Void) -> T :
-  let-var EXECUTION-HALT = halt-function :
-    body()
+;Initialize the ERROR-HANDLER with the default error handling
+;callback.
+defn initialize-error-handler () :
+  ERROR-HANDLER = fn (error-msg) :
+    print(CURRENT-ERROR-STREAM, "FATAL ERROR: ")
+    println(CURRENT-ERROR-STREAM, error-msg)
+    print-stack-trace()
+    exit(-1)
 
+;Hard unrecoverable system error. Used only when error is
+;so serious that we cannot run the standard error-handling
+;process. For example, out of memory, stack overflow, failed system
+;invariance conditions. 
+lostanza defn fatal! (msg:ptr<byte>) -> ref<Void> :
+  call-c clib/fflush(stdout)
+  call-c clib/fprintf(current-err, "FATAL ERROR: %s\n", msg)
+  call-c clib/fflush(current-err)
+  print-stack-trace!()
+  call-c clib/exit(-1)
+  ;Unreachable
+  return false as ref<?>
+
+;Standard fatal error. 
+public defn fatal (msg) -> Void :
+  flush(STANDARD-OUTPUT-STREAM as FileOutputStream)
+  ERROR-HANDLER(to-string(msg))
+
+;Fatal error from LoStanza context.
+public lostanza defn fatal (msg:ptr<byte>) -> ref<Void> :
+  return fatal(String(msg))
+
+;Execute the given body after arming context with the given
+;error handler.
+;Error handler has this type:
+;- handle-error (msg:String) -> ?T
+;- msg is the error message passed to fatal.
+;- The return value of handle-error is returned by execute-with-error-handler.
+public defn execute-with-error-handler<?T> (body:() -> ?T,
+                                            handle-error:String -> ?T) :
+  label<T> break :
+    let-var ERROR-HANDLER = break{handle-error(_)} :
+      body()
+      
+;Convenience function. Just prints the stack trace and then calls halt-function.
+;public defn execute-with-halt-interceptor<?T> (body:() -> ?T, halt-function:() -> Void) -> T :
+;  defn handle-error (error-msg:String, break:T -> Void) -> Void :
+;    print(CURRENT-ERROR-STREAM, "FATAL ERROR: ")
+;    println(CURRENT-ERROR-STREAM, error-msg)
+;    print-stack-trace()
+;    halt-function()
+;  execute-with-error-handler<T>(body, handle-error)
+
+;============================================================
+;================ Top Level Commands ========================
+;============================================================
+
+;The current command launcher
+var COMMAND-LAUNCHER: (() -> False) -> True|False
+
+;Returns false if fatal is called during execution.
+defn initialize-command-launcher () :
+  COMMAND-LAUNCHER = fn (body) :
+    defn handle-error (error-msg:String) -> False :
+      print(CURRENT-ERROR-STREAM, "FATAL ERROR: ")
+      println(CURRENT-ERROR-STREAM, error-msg)    
+      print-stack-trace()
+      false
+    within execute-with-error-handler(handle-error) :
+      body()
+      true    
+
+;Set the current command launcher for the REPL.
+public defn set-command-launcher (launcher:(() -> False) -> True|False) :
+  COMMAND-LAUNCHER = launcher
+
+;Execute the given top level command with the current
+;command launcher
+defn execute-toplevel-command (body:() -> False) -> True|False :
+  COMMAND-LAUNCHER(body)
+  
 ;============================================================
 ;================== Pointer Copying =========================
 ;============================================================
@@ -352,9 +421,78 @@ protected lostanza defn resize-ptr (p:ptr<?>, oldsize:long, newsize:long) -> ptr
 ;===================== Stack Trace ==========================
 ;============================================================
 
+;------------------------------------------------------------
+;-------------------- Stack Trace Filter --------------------
+;------------------------------------------------------------
+
+var STACK-TRACE-FILTER: ((Symbol, String|False) -> True|False)|False = false
+
+public defn set-stack-trace-filter (f:((Symbol, String|False) -> True|False)|False) :
+  STACK-TRACE-FILTER = f
+
+public defn current-stack-trace-filter () -> ((Symbol, String|False) -> True|False)|False :
+  STACK-TRACE-FILTER
+
+;------------------------------------------------------------
+;------------------------ Printing --------------------------
+;------------------------------------------------------------
+
 lostanza defn print-stack-trace (stack:ref<Stack>) -> ref<False> :
   val vms:ptr<VMState> = call-prim flush-vm()
 
+  ;Discover return addresses
+  val buffer = stack-trace-return-addresses(vms,stack)
+
+  ;Print buffer
+  for (var i:long = buffer.length - 1, i >= 0, i = i - 1) :
+    val entry = stack-trace-record(buffer.items[i], vms.stack-trace-table)
+    if entry != null :
+      print-record(entry)
+
+  ;Free the buffer
+  free(buffer)
+  return false
+
+lostanza defn print-record (record:ptr<StackTraceRecord>) -> ref<False> :
+  call-c clib/fprintf(current-err, "  in %s", record.package)
+  if record.signature != null :
+    call-c clib/fprintf(current-err, "/%s", record.signature)
+  call-c clib/fprintf(current-err, "\n")
+  if record.file != null :
+    call-c clib/fprintf(current-err, "    at %s:%d.%d\n", record.file, record.line, record.column)
+  return false  
+
+;------------------------------------------------------------
+;------------------------ Collecting ------------------------
+;------------------------------------------------------------
+
+lostanza defn collect-stack-trace (stack:ref<Stack>) -> ptr<PackedStackTrace> :
+  val vms:ptr<VMState> = call-prim flush-vm()
+
+  ;Discover return addresses
+  val buffer = stack-trace-return-addresses(vms,stack)
+
+  ;Build stack trace
+  val builder = StackTraceBuilder()
+  for (var i:long = buffer.length - 1, i >= 0, i = i - 1) :
+    val entry = stack-trace-record(buffer.items[i], vms.stack-trace-table)
+    if entry != null :
+      add-entry(builder, entry)
+
+  ;Pack stack trace into stable memory
+  val trace = pack(builder)
+
+  ;Free the buffer
+  free(buffer)
+
+  ;Return the packed trace.
+  return trace
+
+;------------------------------------------------------------
+;------------------------ Utilities -------------------------
+;------------------------------------------------------------
+  
+lostanza defn stack-trace-return-addresses (vms:ptr<VMState>, stack:ref<Stack>) -> ptr<LSLongVector> :
   ;Discover return addresses
   val buffer = LSLongVector()
 
@@ -371,22 +509,14 @@ lostanza defn print-stack-trace (stack:ref<Stack>) -> ref<False> :
         val stackmap = vms.stackmap-table[map-index]
         goto loop(sp + stackmap.size)
 
-  ;Print buffer
-  for (var i:long = buffer.length - 1, i >= 0, i = i - 1) :
-    val entry = file-info-entry(buffer.items[i], vms.info-table)
-    if entry != null :
-      call-c clib/fprintf(current-err, "  at %s:%d.%d\n", entry.file, entry.line, entry.column)
+  ;Return the buffer
+  return buffer
 
-  ;Free the buffer
-  free(buffer)
-  return false
-
-lostanza defn file-info-entry (ret:long, info-table:ptr<FileInfoTable>) -> ptr<FileInfoEntry> :
-  for (var i:int = 0, i < info-table.length, i = i + 1) :
-    val entry-addr = addr(info-table.entries[i])
-    val entry = info-table.entries[i]
+lostanza defn stack-trace-record (ret:long, trace-table:ptr<StackTraceTable>) -> ptr<StackTraceRecord> :
+  for (var i:int = 0, i < trace-table.length, i = i + 1) :
+    val entry = addr(trace-table.entries[i])
     if ret == (entry.lbl as long) :
-      return addr(info-table.entries[i])
+      return addr(entry.record)
   return null
 
 ;============================================================
@@ -628,6 +758,11 @@ lostanza val SYSTEM-PAGE-SIZE : long = 4096
 
 public lostanza defn round-up-to-whole-pages (x:long) -> long :
   return (x + (SYSTEM-PAGE-SIZE - 1)) & ( ~ (SYSTEM-PAGE-SIZE - 1));
+
+;Explicitly request a garbage collection cycle.
+public lostanza defn run-garbage-collector () -> ref<False> :
+  extend-heap(0L)
+  return false
 
 ;This hook is called automatically by the generated code (and the
 ;VM) when we need to allocate a new object and there isn't
@@ -1010,25 +1145,37 @@ lostanza defn extend-stack (size:long) -> long :
   ;Compute new size of stack
   val maximum-size = 1024L * 1024L * 1024L
   val desired-size = s.stack-pointer + size - s.frames
-  var size*:long = s.size
-  while size* < desired-size : size* = size* * 2
-  size* = min(size*, maximum-size)
+  val old-size = s.size
+  var new-size:long = s.size
+  while new-size < desired-size : new-size = new-size * 2
+  new-size = min(new-size, maximum-size)
 
   ;Check for stack overflow
-  if size* < desired-size :
+  if new-size < desired-size :
     fatal!("Stack overflow")
 
-  ;Allocate new frames and copy over old frames
-  val frameheader = take-next-stack(addr(STACK-POOL), size*)
-  val frames* = addr(frameheader.frames)
-  call-c clib/memcpy(frames*, s.frames, s.size)
-  ;call-c clib/printf("extending stack\n")
-  free-stack(addr(STACK-POOL), header(s.frames))
+  ;Allocate new frames
+  val old-frameheader = header(s.frames)
+  val old-frames = s.frames
+  val new-frameheader = take-next-stack(addr(STACK-POOL), new-size)
+  val new-frames = addr(new-frameheader.frames)
+
+  ;Copy over old frames
+  call-c clib/memcpy(new-frames, old-frames, old-size)
+
+  ;Transition over mark from old frames to new frames.
+  ;(In case this code is executing within the garbage collector code.)
+  new-frameheader.mark = old-frameheader.mark
+  old-frameheader.mark = 0
+
+  ;Free old frames
+  free-stack(addr(STACK-POOL), old-frameheader)
 
   ;Swap in new frames
-  s.stack-pointer = s.stack-pointer + (frames* - s.frames)
-  s.size = size*
-  s.frames = frames*
+  s.stack-pointer = s.stack-pointer + (new-frames - old-frames)
+  s.size = new-size
+  s.frames = new-frames
+
 
   ;Return
   return 0
@@ -2452,7 +2599,7 @@ lostanza defn dump-stack (stackref:long, vms:ptr<VMState>) -> int :
           if f != f-end :
             val f* = f + map.size
             if f* > f-end :
-              call-c clib/printf("New stack %p is past end\n", f)
+              call-c clib/printf("New stack %p is past end\n", f*)
               call-c clib/exit(-1)
             goto loop(f*)
   return 0
@@ -3462,7 +3609,10 @@ lostanza defn detach-coroutine (c:ref<RawCoroutine>, detached-status:ref<Int>) -
 ;==================== LivenessTracker =======================
 ;============================================================
 
-public deftype Unique
+public deftype Unique <: Equalable
+
+defmethod equal? (a:Unique, b:Unique) :
+  ($prim identical? a b)
 
 public lostanza deftype LivenessTracker :
   value: ref<False|Unique>
@@ -3589,7 +3739,8 @@ protected val uninitialized = new Uninitialized
 ;=================== Initialize Remaining ===================
 ;============================================================
 
-initialize-launcher()
+initialize-error-handler()
+initialize-command-launcher()
 initialize-winders()
 initialize-coroutines()
 initialize-gc-notifiers()
@@ -4957,11 +5108,25 @@ public defn StringBuffer () :
 ;============================================================
 ;==================== Remove File ===========================
 ;============================================================
-
-public lostanza defn delete-file (path:ref<String>) -> ref<False> :
-   val r = call-c clib/remove(addr!(path.chars))
-   if r == -1 : throw(FileDeletionError(path, linux-error-msg()))
-   return false
+#if-defined(PLATFORM-WINDOWS) : 
+  lostanza defn delete-folder (path:ref<String>) -> ref<False> : 
+    val r = call-c clib/rmdir(addr!(path.chars))
+    if r == -1 : throw(FileDeletionError(path, linux-error-msg()))
+    return false
+  lostanza defn delete-plain-file (path:ref<String>) -> ref<False> : 
+    val r = call-c clib/remove(addr!(path.chars))
+    if r == -1 : throw(FileDeletionError(path, linux-error-msg()))
+    return false
+  public defn delete-file (path:String) : 
+    if file-exists?(path) and file-type(path) is DirectoryType : 
+      delete-folder(path)
+    else : 
+      delete-plain-file(path)
+#else : 
+  public lostanza defn delete-file (path:ref<String>) -> ref<False> : 
+    val r = call-c clib/remove(addr!(path.chars))
+    if r == -1 : throw(FileDeletionError(path, linux-error-msg()))
+    return false
 
 public deftype FileDeletionError <: Exception
 public defn FileDeletionError (path:String, msg:String) :
@@ -5330,13 +5495,20 @@ public defn delete-recursive (path:String) :
 ;================ Create a New Directory ====================
 ;============================================================
 
-extern mkdir: (ptr<byte>, long) -> int
-
-public lostanza defn create-dir (dirname:ref<String>, 
-                                 permissions:ref<Int>) -> ref<False> :
-  val result = call-c mkdir(addr!(dirname.chars), permissions.value)
-  if result == -1 : throw(CreateDirException(dirname, linux-error-msg()))  
-  return false
+#if-defined(PLATFORM-WINDOWS) :
+  extern _mkdir: (ptr<byte>) -> int
+  public lostanza defn create-dir (dirname:ref<String>, 
+                                  permissions:ref<Int>) -> ref<False> :
+    val result = call-c _mkdir(addr!(dirname.chars))
+    if result == -1 : throw(CreateDirException(dirname, linux-error-msg()))  
+    return false
+#else : 
+  extern mkdir: (ptr<byte>, long) -> int
+  public lostanza defn create-dir (dirname:ref<String>, 
+                                  permissions:ref<Int>) -> ref<False> :
+    val result = call-c mkdir(addr!(dirname.chars), permissions.value)
+    if result == -1 : throw(CreateDirException(dirname, linux-error-msg()))  
+    return false
 
 public defn create-dir (dirname:String) :
   create-dir(dirname, 0o777)
@@ -5406,23 +5578,25 @@ public lostanza defn exit (code:ref<Int>) -> ref<Void> :
 ;===================== Exceptions ===========================
 ;============================================================
 
-public deftype Exception
+;Represents all exceptions.
+public deftype Exception <: Unique
 
-public defn Exception (msg) :
-   new Exception :
-      defmethod print (o:OutputStream, this) :
-         print(o, msg)
+;Simple constructor for a generic exception.
+public defn Exception (msg) -> Exception :
+  new Exception :
+    defmethod print (o:OutputStream, this) :
+      print(o, msg)
 
+;Holds the currently-equipped exception handler.
 var CURRENT-EXCEPTION-HANDLER : Exception -> Void =
-   fn (e:Exception) :
-      fatal(e)
+  fn (e:Exception) :
+    fatal(e)
 
+;Throw the given exception to the currently-set handler.
 public defn throw (e:Exception) :
-   CURRENT-EXCEPTION-HANDLER(e)
+  CURRENT-EXCEPTION-HANDLER(e)
 
-defstruct ExceptionResult : (exception: Exception)
-defstruct NormalResult : (result)
-
+;Run the given body with the equipped exception interceptor.
 public defn with-exception-interceptor<?T> (body: () -> ?T,
                                             intercept: Exception -> Void) -> T :
   val handler = CURRENT-EXCEPTION-HANDLER
@@ -5432,15 +5606,44 @@ public defn with-exception-interceptor<?T> (body: () -> ?T,
   let-var CURRENT-EXCEPTION-HANDLER = interceptor :
     body()
 
+;Run the given body with the equipped catchers.
 public defn with-exception-handler<?T> (body: () -> ?T,
-                                        handler: Exception -> ?T) -> T :
-   val r = label<ExceptionResult|NormalResult> break :
-      let-var CURRENT-EXCEPTION-HANDLER = break{ExceptionResult(_)} :
-         NormalResult(body())
-   match(r) :
-      (r:ExceptionResult) : handler(exception(r))
-      (r:NormalResult) : result(r)
+                                        catch?: Exception -> True|False,
+                                        catcher: Exception -> ?T) -> T :
+  ;Execute the body within a label so that stack can be unwound.
+  val r = label<ExceptionResult|NormalResult> break :
+    ;Get the current handler. This needs to be called if the
+    ;equipped catcher doesn't handle this.
+    val current-handler = CURRENT-EXCEPTION-HANDLER
 
+    ;Implementation of throw within the body.
+    defn throw-within-body (e:Exception) :
+      ;First check whether the catcher is supposed to handle this
+      ;exception.
+      if catch?(e) :
+        ;If it is, then unwind the stack and handle it.
+        break(ExceptionResult(e))
+      else :
+        ;Otherwise, pass the exception to the next handler
+        ;to handle it.
+        current-handler(e)    
+
+    ;Execute the body with the new throw equipped.
+    let-var CURRENT-EXCEPTION-HANDLER = throw-within-body :
+      NormalResult(body())
+      
+  ;Depending on whether the body executed successfully, either
+  ;run the catcher or not.
+  match(r) :
+    (r:ExceptionResult) : catcher(exception(r))
+    (r:NormalResult) : result(r)
+
+;Represents the return value from a body when equipped
+;with catchers.
+defstruct ExceptionResult : (exception: Exception)
+defstruct NormalResult : (result)
+
+;Run the given body with the equipped finally block.
 public defn with-finally<?T> (body: () -> ?T, finally: () -> ?) -> T :
   push-winder(Winder(false, false, finally))
   inc-winders(current-coroutine, 1)
@@ -6553,7 +6756,7 @@ public defn lazy-qsort<?T,?S> (key:T -> ?S&Comparable<S>, coll:Seqable<?T>) :
 ;======================= Arrays =============================
 ;============================================================
 
-public deftype Array<T> <: IndexedCollection<T> & Equalable
+public deftype Array<T> <: IndexedCollection<T> & Unique
 
 ;                     Implementation
 ;                     ==============
@@ -6590,9 +6793,6 @@ lostanza defmethod length (a:ref<RawArray>) -> ref<Int> :
 defmethod print (o:OutputStream, a:RawArray) -> False :
    print(o, "[%@]" % [a])
 
-defmethod equal? (a:RawArray, b:RawArray) :
-   ($prim identical? a b)
-
 ;                     Wrapping
 ;                     ========
 
@@ -6607,7 +6807,6 @@ defmethod equal? (a:RawArray, b:RawArray) :
 #else :
 
    deftype WrappedArray<T> <: Array<T>
-   defmulti raw (a:WrappedArray) -> RawArray
 
    public defn Array<T> (n:Int) -> Array<T> :
       ensure-non-negative("length", n)
@@ -6619,7 +6818,6 @@ defmethod equal? (a:RawArray, b:RawArray) :
 
    defn Array<T> (a:RawArray) -> Array<T> :
       new WrappedArray<T> :
-         defmethod raw (this) : a
          defmethod get (this, i:Int) :
             ensure-index-in-bounds(a, i)
             match(a[i]) :
@@ -6635,8 +6833,6 @@ defmethod equal? (a:RawArray, b:RawArray) :
             length(a)
          defmethod print (o:OutputStream, this) :
             print(o, a)
-         defmethod equal? (this, x:WrappedArray) :
-            a == raw(x)
 
 public defn map<R,?T> (f: T -> R, xs:Array<?T>) -> Array<R> :
    val ret = Array<R>(length(xs))
@@ -6962,6 +7158,8 @@ lostanza defn digit (c:byte, radix:int) -> int :
 ;                        ================
 
 lostanza defn pos-to-int (s:ref<String>, start:int, radix:int) -> ref<False|Int> :
+  if empty?(s) == true :
+    return false
   var n:int = 0
   for (var i:long = start, 1, i = i + 1) :
     if s.chars[i] == 0 :
@@ -6977,6 +7175,8 @@ lostanza defn pos-to-int (s:ref<String>, start:int, radix:int) -> ref<False|Int>
   return false
 
 lostanza defn neg-to-int (s:ref<String>, start:int, radix:int) -> ref<False|Int> :
+  if empty?(s) == true :
+    return false
   var n:int = 0
   for (var i:long = start, 1, i = i + 1) :
     if s.chars[i] == 0 :
@@ -6992,6 +7192,8 @@ lostanza defn neg-to-int (s:ref<String>, start:int, radix:int) -> ref<False|Int>
   return false
 
 lostanza defn bits-to-int (s:ref<String>, start:int, radix:int, bits:int) -> ref<False|Int> :
+  if empty?(s) == true :
+    return false
   var n:int = 0
   var nbits:int = 0
   for (var i:long = start, 1, i = i + 1) :
@@ -7012,6 +7214,8 @@ lostanza defn bits-to-int (s:ref<String>, start:int, radix:int, bits:int) -> ref
 ;                        =============
 
 lostanza defn pos-to-long (s:ref<String>, start:int, radix:int) -> ref<False|Long> :
+  if empty?(s) == true :
+    return false
   var n:long = 0
   for (var i:long = start, 1, i = i + 1) :
     if s.chars[i] == 0 :
@@ -7027,6 +7231,8 @@ lostanza defn pos-to-long (s:ref<String>, start:int, radix:int) -> ref<False|Lon
   return false
 
 lostanza defn neg-to-long (s:ref<String>, start:int, radix:int) -> ref<False|Long> :
+  if empty?(s) == true :
+    return false
   var n:long = 0
   for (var i:long = start, 1, i = i + 1) :
     if s.chars[i] == 0 :
@@ -7042,6 +7248,8 @@ lostanza defn neg-to-long (s:ref<String>, start:int, radix:int) -> ref<False|Lon
   return false
 
 lostanza defn bits-to-long (s:ref<String>, start:int, radix:int, bits:int) -> ref<False|Long> :
+  if empty?(s) == true :
+    return false
   var n:long = 0
   var nbits:int = 0
   for (var i:long = start, 1, i = i + 1) :

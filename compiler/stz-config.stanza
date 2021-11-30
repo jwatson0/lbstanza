@@ -37,6 +37,9 @@ defstruct MaxHeapSizeStmt <: ConfigStmt :
 defstruct ExperimentalStmt <: ConfigStmt :
   info: FileInfo|False with: (as-method => true)
   value: True|False
+defstruct AuxFileStmt <: ConfigStmt :
+  info: FileInfo|False with: (as-method => true)
+  path: String with: (updater => sub-path)
 
 ;============================================================
 ;====================== Checker =============================
@@ -64,6 +67,7 @@ defn name (s:ConfigStmt) :
     (s:ProjFilesStmt) : "proj-files"
     (s:MaxHeapSizeStmt) : "compiler-max-heap-size"
     (s:ExperimentalStmt) : "experimental"
+    (s:AuxFileStmt) : "aux-file"
 
 defn ensure-no-duplicate-stmts! (f:ConfigFile) :
   for entry in group-by(name, stmts(f)) do :
@@ -90,6 +94,7 @@ defn substitute-environment-variables (file:ConfigFile) -> ConfigFile :
       (s:InstallDirStmt) : sub-path(s, sub(path(s)))
       (s:PkgDirsStmt) : sub-paths(s, map(sub, paths(s)))
       (s:ProjFilesStmt) : sub-paths(s, map(sub, paths(s)))
+      (s:AuxFileStmt) : sub-path(s, sub(path(s)))
       (s) : s
   ConfigFile(path(file), stmts*)
 
@@ -106,6 +111,7 @@ defn resolve-relative-paths (file:ConfigFile) -> ConfigFile :
       (s:InstallDirStmt) : sub-path(s, resolve(path(s)))
       (s:PkgDirsStmt) : sub-paths(s, map(resolve, paths(s)))
       (s:ProjFilesStmt) : sub-paths(s, map(resolve, paths(s)))
+      (s:AuxFileStmt) : sub-path(s, resolve(path(s)))
       (s) : s
   ConfigFile(path(file), stmts*)
 
@@ -129,6 +135,8 @@ defn execute (file:ConfigFile) :
         set-max-heap-size(size(s))
       (s:ExperimentalStmt) :
         EXPERIMENTAL = value(s)
+      (s:AuxFileStmt) :
+        AUX-FILE-OVERRIDE = path(s)
 
 ;============================================================
 ;================ Configuration Syntax ======================
@@ -144,7 +152,7 @@ defsyntax stanza-config :
 
   defproduction sym: Symbol
   defrule sym = (?x) when ut(x) is Symbol : ut(x)
-  
+
   defproduction string: String
   defrule string = (?x) when ut(x) is String : ut(x)
 
@@ -174,6 +182,7 @@ defsyntax stanza-config :
   defrule stmt! = (proj-files = (?paths:#string! ...)) : ProjFilesStmt(closest-info(), to-tuple(paths))
   defrule stmt! = (compiler-max-heap-size = ?size:#long!) : MaxHeapSizeStmt(closest-info(), size)
   defrule stmt! = (experimental = ?b:#bool!) : ExperimentalStmt(closest-info(), b)
+  defrule stmt! = (aux-file = ?path:#string!) : AuxFileStmt(closest-info(), path)
   fail-if stmt! = () : PE(closest-info(), "Invalid configuration rule.")
 
 ;============================================================
@@ -216,7 +225,7 @@ public defn read-config-file () :
           (path:False) : false
 
       extract-from-env("STANZA_CONFIG", true)
-      extract-from-file(".stanza")      
+      extract-from-file(".stanza")
       extract-from-env("HOME", false)
       throw(Exception("Could not locate .stanza configuration file."))
 
@@ -243,7 +252,7 @@ defn verify-installation () :
   ;Throw an exception if the stanza executable returns the wrong version number.
   defn ensure-matching-version! () :
     val exe-file = system-filepath(StanzaCompiler)
-    val v = 
+    val v =
       try :
         ;Retrieve the version of the executable.
         call-system-and-get-output(exe-file, [exe-file, "version", "-terse"])
@@ -252,12 +261,12 @@ defn verify-installation () :
         val msg = "Stanza install directory is set to %_, \
                    but the version of the Stanza executable could not verified. %_"
         throw $ Exception(msg % [STANZA-INSTALL-DIR, e])
-      
+
     ;Check that the version string is well-formatted.
     if not version-string?(v) :
       val msg = "Stanza install directory is set to %_, \
                  but the version of the Stanza executable is invalid: %~."
-      throw $ Exception(msg % [STANZA-INSTALL-DIR, v])           
+      throw $ Exception(msg % [STANZA-INSTALL-DIR, v])
 
     ;Check that the version string matches the version of the
     ;currently running executable.
@@ -266,11 +275,11 @@ defn verify-installation () :
       val msg = "Stanza install directory is set to %_, \
                  but the Stanza executable at that location has version %~ whereas \
                  the currently running executable has version %~."
-      throw $ Exception(msg % [STANZA-INSTALL-DIR, v, this-v])           
+      throw $ Exception(msg % [STANZA-INSTALL-DIR, v, this-v])
 
   ;Check conditions
   ensure-license-exists!()
-  ensure-matching-version!()  
+  ensure-matching-version!()
 
 ;============================================================
 ;============= Environment Variable Substitution ============
@@ -320,7 +329,7 @@ defn sub-curly (f:String -> String, s:String) -> String :
 defstruct EnvSubstitutionError <: Exception :
   info:FileInfo|False
   name:String
-  
+
 defmethod print (o:OutputStream, e:EnvSubstitutionError) :
   val msg = "%_Could not determine value of environment variable %_."
   print(o, msg % [info-str(info(e)), name(e)])

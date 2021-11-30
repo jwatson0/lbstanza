@@ -7,6 +7,7 @@ defpackage stz/asm-ir :
   import core
   import collections
   import stz/typeset
+  import core/stack-trace
 
 ;<doc>=======================================================
 ;====================== Link Utilities ======================
@@ -168,7 +169,7 @@ public defast :
       id: Int
     Label :
       n: Int
-      info: False|FileInfo with: (default => false)
+      trace-entry: False|StackTraceEntry with: (default => false)
     ExLabel :
       name: Symbol
     Match :
@@ -201,6 +202,10 @@ public defast :
     DefSpace : (size:Int)
     DefLabel : (n:Int)
 
+    ;==== Misc Instructions ====
+    Comment :
+      msg: String
+
   ;Mapper Utilities
   defmapper (f:Imm -> Imm) :
     (x:Loc) : f(x) as Loc
@@ -225,7 +230,7 @@ public defast :
     String
     ByteArray
     Symbol
-    False|FileInfo
+    False|StackTraceEntry
 
   ;Mappers
   make-mapper(f:Imm -> Imm, e:Ins)
@@ -317,7 +322,7 @@ defmethod print (o:OutputStream, i:Ins) :
     (i:Return) : "   return"
     (i:Goto) : "   goto %~" % [x(i)]
     (i:Break) : "   %~: break %~ when %~ %~ %~" % [type(i), x(i), y(i), op(i), z(i)]
-    (i:Label) : "L<%~> : %_" % [n(i), info(i)]
+    (i:Label) : "L<%~> : %_" % [n(i), trace-entry(i)]
     (i:LinkLabel) : "linked %_" % [id(i)]
     (i:ExLabel) : "L<%~>" % [name(i)]
     (i:Match) : "   match(%,) %_ no: %_" % [xs(i), branches(i), no-branch(i)]    
@@ -336,6 +341,7 @@ defmethod print (o:OutputStream, i:Ins) :
     (i:DefBytes) : "   .bytes %~" % [value(i)]
     (i:DefSpace) : "   .space %~" % [size(i)]
     (i:DefLabel) : "   .label L<%~>" % [n(i)]
+    (i:Comment) : "   //%_" % [msg(i)]
 
 defmethod print (o:OutputStream, b:Branch) :
   print(o, "(%,) => L%_" % [tags(b), dst(b)])

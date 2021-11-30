@@ -12,6 +12,7 @@ defpackage stz/vm-jit :
   import stz/conversion-utils
   import stz/dispatch-dag
   import stz/asmjit
+  import core/stack-trace
 
 val debugging? = false
 val tracing? = true
@@ -55,15 +56,15 @@ public defmulti tagbits (r:EncodingResolver, typeid:Int) -> Int
 
 public defstruct EncodedFunction :
   func: Func
-  fileinfos: Vector<FileInfoEntry>
+  trace-entries: Vector<TraceTableEntry>
+
+public defstruct TraceTableEntry :
+  pc: Int
+  entry: StackTraceEntry
 
 public defn value (ef:EncodedFunction) -> Long :
   value(func(ef))
   
-public defstruct FileInfoEntry :
-  pc: Int
-  fileinfo: FileInfo
-
 defn c-params () : [rdi(), rsi(), rdx(), rcx(), r8(), r9()]
 
 defn bind-parameters (a:Assembler, args:Seqable<Gp>) :
@@ -113,6 +114,14 @@ lostanza defn call-print-stack-trace-addr () -> ref<Long> :
 
 defn call-print-stack-trace (a:Assembler, vmstate:Gp, stack:Gp) -> Gp :
   c-call(a, call-print-stack-trace-addr(), [vmstate, stack])
+
+extern call_collect_stack_trace: (ptr<?>, long) -> int
+
+lostanza defn call-collect-stack-trace-addr () -> ref<Long> :
+  return new Long{addr!(call_collect_stack_trace) as long}
+
+defn call-collect-stack-trace (a:Assembler, vmstate:Gp, stack:Gp) -> Gp :
+  c-call(a, call-collect-stack-trace-addr(), [vmstate, stack])
 
 extern retrieve_class_name: (ptr<?>, long) -> int
 
@@ -495,11 +504,11 @@ public defn encode (fid:Int, func:VMFunction,
 
   ;Accumulate file information entries for implementing
   ;stack traces.
-  val fileinfo-table = Vector<FileInfoEntry>()
-  defn record-info (info:FileInfo|False) :
-    match(info:FileInfo) :
-      debug(a, "+++ %s\n", CONST(tmp1(), printf-format(to-string(info))))
-      add(fileinfo-table, FileInfoEntry(buffer-pos(), info))
+  val trace-entry-table = Vector<TraceTableEntry>()
+  defn record-trace-entry (entry:StackTraceEntry|False) :
+    match(entry:StackTraceEntry) :
+      debug(a, "+++ %s\n", CONST(tmp1(), printf-format(to-string(entry))))
+      add(trace-entry-table, TraceTableEntry(buffer-pos(), entry))
 
   ;Calculation of sizes
   defn object-size (num-obj:Int, size-on-heap:Int) :
@@ -984,6 +993,9 @@ public defn encode (fid:Int, func:VMFunction,
       PRINT-STACK-TRACE-OPCODE : ;YYY
         plop("B PRINT-STACK-TRACE")
         SET-LOCAL(x, call-print-stack-trace(a, vmstate(), LOCAL(tmp1(), value)))
+      COLLECT-STACK-TRACE-OPCODE : ;YYY
+        plop("B PRINT-STACK-TRACE")
+        SET-LOCAL(x, call-collect-stack-trace(a, vmstate(), LOCAL(tmp1(), value)))
       GET-REG-OPCODE : ;YYY
         plop("B GET-REG %_ %_" % [x value])
         SET-LOCAL(x, GET-REG(tmp1(), value))
@@ -2105,10 +2117,10 @@ public defn encode (fid:Int, func:VMFunction,
         label-table[n] = new-label(a)
       label-table[n]
       
-    defn before-call-trace (info:False|FileInfo) :
-      match(info:FileInfo) :
-        debug(a, ">>> %s\n", CONST(tmp1(), printf-format(to-string(info))))
-        trace(a, ">>> %s\n", CONST(tmp1(), printf-format(to-string(info))))
+    defn before-call-trace (entry:False|StackTraceEntry) :
+      match(entry:StackTraceEntry) :
+        debug(a, ">>> %s\n", CONST(tmp1(), printf-format(to-string(entry))))
+        trace(a, ">>> %s\n", CONST(tmp1(), printf-format(to-string(entry))))
 
     ;Encode each instruction
     defn emit-ins (ins:VMIns) :
@@ -2127,16 +2139,16 @@ public defn encode (fid:Int, func:VMFunction,
           emit-ins-a(TCALL-CLOSURE-OPCODE, to-local(f(ins), 0))
         (ins:CallIns) :
           set-regs(ys(ins))
-          before-call-trace(info(ins))
+          before-call-trace(trace-entry(ins))
           emit-ins-c(call-opcode(f(ins)), num-locals, to-function-local(f(ins)))
-          record-info(info(ins))
+          record-trace-entry(trace-entry(ins))
           emit-ins-a(POP-FRAME-OPCODE, num-locals)
           get-regs(xs(ins))
         (ins:CallClosureIns) :
           set-regs(ys(ins))
-          before-call-trace(info(ins))
+          before-call-trace(trace-entry(ins))
           emit-ins-c(CALL-CLOSURE-OPCODE, num-locals, to-local(f(ins), 0))
-          record-info(info(ins))
+          record-trace-entry(trace-entry(ins))
           emit-ins-a(POP-FRAME-OPCODE, num-locals)
           get-regs(xs(ins))
         (ins:CallCIns) :
@@ -2183,14 +2195,14 @@ public defn encode (fid:Int, func:VMFunction,
           set-reg(num-int-args-index, NumConst(num-int-args(records) + 1))
           set-reg(num-floats-in-call-index, NumConst(num-real-args(records)))
           ;Call function
-          before-call-trace(info(ins))
+          before-call-trace(trace-entry(ins))
           match(f(ins)) :
             (f:Local) :
               emit-ins-c(CALLC-OPCODE-LOCAL, num-locals, slot(f))
             (f:ExternId) :
               val address = to-bits(f) as Long
               emit-ins-d(CALLC-OPCODE-WIDE, num-locals, address)
-          record-info(info(ins))
+          record-trace-entry(trace-entry(ins))
           ;Retrieve return registers
           defn return-register-index (l:CallLoc) :
             match(l) :
@@ -2204,7 +2216,7 @@ public defn encode (fid:Int, func:VMFunction,
           set-regs(ys(ins))
           val opcode = ENTER-STACK-OPCODE when enter?(ins) else YIELD-OPCODE
           emit-ins-a(opcode, to-local(f(ins), 0))
-          record-info(info(ins))
+          record-trace-entry(trace-entry(ins))
           get-regs(xs(ins))
         (ins:ReturnIns) :
           set-regs(xs(ins))
@@ -2288,7 +2300,7 @@ public defn encode (fid:Int, func:VMFunction,
               emit-ins-c(RESERVE-OPCODE-LOCAL, continue-label, num-locals, size-local)
             else :
               emit-ins-c(RESERVE-OPCODE-CONST, continue-label, num-locals, sum-of-sizes)
-            record-info(info(ins))
+            record-trace-entry(trace-entry(ins))
             emit-ins-a(POP-FRAME-OPCODE, num-locals)
             bind(a, continue-label)
             for (x in xs(ins), t in types(ins), sz in obj-sizes) do :
@@ -2304,7 +2316,7 @@ public defn encode (fid:Int, func:VMFunction,
             val type = types(ins)[0]
             val size = to-local(sizes(ins)[0], 0)
             emit-ins-c(RESERVE-OPCODE-LOCAL, continue-label, num-locals, size)
-            record-info(info(ins))
+            record-trace-entry(trace-entry(ins))
             emit-ins-a(POP-FRAME-OPCODE, num-locals)
             bind(a, continue-label)
             emit-ins-c(ALLOC-OPCODE-LOCAL, slot(x), size, type)
@@ -2441,7 +2453,7 @@ public defn encode (fid:Int, func:VMFunction,
   encode(func as VMMultifn|VMFunc)
   val f = add(rt, code)
   plop("FUNC %_" % [hex(value(f))])
-  EncodedFunction(f, fileinfo-table)
+  EncodedFunction(f, trace-entry-table)
 
 ;============================================================
 ;======================= Opcodes ============================
@@ -2641,6 +2653,7 @@ val GC-OPCODE = 185
 val CLASS-NAME-OPCODE = 241
 val C-RSP-OPCODE = 243
 val PRINT-STACK-TRACE-OPCODE = 186
+val COLLECT-STACK-TRACE-OPCODE = 187
 val FLUSH-VM-OPCODE = 188
 ;2-arity branch operations
 val JUMP-INT-LT-OPCODE = 192
@@ -2834,6 +2847,7 @@ defn op1-opcode (op:VMOp, xt:VMType, yt:VMType) -> Int|False :
     (op:GCOp, xt, yt) : GC-OPCODE
     (op:ClassNameOp, xt, yt) : CLASS-NAME-OPCODE
     (op:PrintStackTraceOp, xt, yt) : PRINT-STACK-TRACE-OPCODE
+    (op:CollectStackTraceOp, xt, yt) : COLLECT-STACK-TRACE-OPCODE
 
 defn op2-opcode (op:VMOp, xt:VMType, yt:VMType) :
   match(op, xt, yt) :
@@ -3168,6 +3182,7 @@ opcode-names[GC-OPCODE] = "GC-OPCODE"
 opcode-names[CLASS-NAME-OPCODE] = "CLASS-NAME-OPCODE"
 opcode-names[C-RSP-OPCODE] = "C-RSP-OPCODE"
 opcode-names[PRINT-STACK-TRACE-OPCODE] = "PRINT-STACK-TRACE-OPCODE"
+opcode-names[COLLECT-STACK-TRACE-OPCODE] = "COLLECT-STACK-TRACE-OPCODE"
 opcode-names[FLUSH-VM-OPCODE] = "FLUSH-VM-OPCODE"
 opcode-names[JUMP-INT-LT-OPCODE] = "JUMP-INT-LT-OPCODE"
 opcode-names[JUMP-INT-GT-OPCODE] = "JUMP-INT-GT-OPCODE"
