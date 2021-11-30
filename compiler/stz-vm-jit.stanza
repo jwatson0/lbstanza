@@ -140,7 +140,6 @@ val VMSTATE-HEAP-LIMIT-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
 val VMSTATE-FREE-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
 val VMSTATE-FREE-LIMIT-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
 val VMSTATE-CURRENT-STACK-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
-println("VMSTATE-CURRENT-STACK-OFFSET %_" % [VMSTATE-CURRENT-STACK-OFFSET])
 val VMSTATE-SYSTEM-STACK-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
 val VMSTATE-SYSTEM-REGISTERS-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
 val VMSTATE-TRIE-TABLE-OFFSET = next(vmstate-offsets, SIZEOF-LONG)
@@ -162,13 +161,11 @@ val FUNCTION-NUM-SLOTS-OFFSET = next(function-offsets, SIZEOF-LONG)
 val FUNCTION-CODE-OFFSET = next(function-offsets, SIZEOF-LONG)
 val FUNCTION-SLOTS-OFFSET = next(function-offsets, SIZEOF-LONG)
 
-println("FUNCTION-CODE-OFFSET %_" % [FUNCTION-CODE-OFFSET])
-
 defn vmstate-reg (a:Assembler, dst:Gp, offset:Int) -> Gp :
   mov(a, dst, MemPtr(vmstate(), offset, SIZEOF-LONG))
   dst
 defn vmstate-reg (a:Assembler, offset:Int) -> Gp :
-  vmstate-reg(a, rax(), offset)
+  vmstate-reg(a, rcx(), offset)
 
 defn set-vmstate-reg (a:Assembler, offset:Int, value:Gp) :
   mov(a, MemPtr(vmstate(), offset, SIZEOF-LONG), value)
@@ -246,13 +243,14 @@ defn all-restore-registers (a:Assembler) :
 defn trace (a:Assembler, format:String, a0:Gp, a1:Gp, a2:Gp) :
   if tracing? :
     all-save-registers(a)
-    mov(a, rdi(), printf-format(format))
-    mov(a, r8(), a0)
-    mov(a, r9(), a1)
-    mov(a, r10(), a2)
-    mov(a, rsi(), r8())
-    mov(a, rdx(), r9())
-    mov(a, rcx(), r10())
+    mov(a, r8(), printf-format(format))
+    mov(a, r9(), a0)
+    mov(a, r10(), a1)
+    mov(a, r11(), a2)
+    mov(a, rdi(), r8())
+    mov(a, rsi(), r9())
+    mov(a, rdx(), r10())
+    mov(a, rcx(), r11())
     mov(a, rax(), 0L)
     mov(a, tmp1(), printf-addr())
     call(a, tmp1())
@@ -265,13 +263,14 @@ defn trace (a:Assembler, format:String, a0:Gp, a1:Gp) : trace(a, format, a0, a1,
 defn debug (a:Assembler, format:String, a0:Gp, a1:Gp, a2:Gp) :
   if debugging? :
     all-save-registers(a)
-    mov(a, rdi(), printf-format(format))
-    mov(a, r8(), a0)
-    mov(a, r9(), a1)
-    mov(a, r10(), a2)
-    mov(a, rsi(), r8())
-    mov(a, rdx(), r9())
-    mov(a, rcx(), r10())
+    mov(a, r8(), printf-format(format))
+    mov(a, r9(), a0)
+    mov(a, r10(), a1)
+    mov(a, r11(), a2)
+    mov(a, rdi(), r8())
+    mov(a, rsi(), r9())
+    mov(a, rdx(), r10())
+    mov(a, rcx(), r11())
     mov(a, rax(), 0L)
     mov(a, tmp1(), printf-addr())
     call(a, tmp1())
@@ -530,14 +529,14 @@ public defn encode (fid:Int, func:VMFunction,
     dst
   defn SET-REG (r:Int, v:Gp) :
     mov(a, MemPtr(registers(), CONST(rbx(), r), 3, 0, SIZEOF-LONG), v)
-    debug(a, "SET-REG[%d] = %llx\n", CONST(rbx(), r), v)
-    trace(a, "  SET-REG[%d] = %llx\n", CONST(rbx(), r), v)
+    debug(a, "SET-REG[%d] = 0x%llx\n", CONST(rbx(), r), v)
+    trace(a, "  SET-REG[%d] = 0x%llxL\n", CONST(rbx(), r), v)
     ; registers[r] = v
     false
   defn SET-LOCAL (l:Int, v:Gp) :
     mov(a, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG), v)
-    debug(a, "  SET-LOCAL[%d] %llx\n", CONST(rbx(), l), v)
-    trace(a, "  SET-LOCAL[%d] = %llx\n", CONST(rax(), l), v)
+    debug(a, "  SET-LOCAL[%d] = 0x%llx\n", CONST(rbx(), l), v)
+    trace(a, "  SET-LOCAL[%d] = 0x%llxL\n", CONST(rax(), l), v)
     ; stack_pointer->slots[l] = v;
     false
   defn SET-LOCAL-BYTE (l:Int, v:Gp) :
@@ -569,7 +568,7 @@ public defn encode (fid:Int, func:VMFunction,
     ; mov(a, dst, MemPtr(stack-frame-slots(rbx()), CONST(rsi(), l), 3, 0, SIZEOF-LONG)) 
     mov(a, dst, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG)) 
     dst
-  defn LOCAL (l:Int) -> Gp : LOCAL(rax(), l)
+  defn LOCAL (l:Int) -> Gp : LOCAL(tmp2(), l)
    ; stack_pointer->slots[l]
   defn LOCAL-FLOAT (dst:Xmm, l:Int) -> Xmm :
     movss(a, dst, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-INT))
@@ -653,7 +652,7 @@ public defn encode (fid:Int, func:VMFunction,
   defn trace-opcode (opcode:Int) :
     val name = string-join([ "%d: " opcode-names[opcode] "\n" ])
     if tracing? :
-      val counter = rcx()
+      val counter = rdi()
       mov(a, counter, vmstate-reg(a, VMSTATE-INSTRUCTIONS-OFFSET))
       trace(a, name, counter)
       add(a, counter, 1)
@@ -838,16 +837,16 @@ public defn encode (fid:Int, func:VMFunction,
         debug(a, "NOT-INT %llx %llx\n", tmp1(), LOCAL(tmp2(), x))
       NOT-OPCODE-LONG : ;YYY
         plop("B NOT-LONG")
-        not-op(a, LOCAL(rax(), value))
-        SET-LOCAL(x, rax())
+        not-op(a, LOCAL(tmp2(), value))
+        SET-LOCAL(x, tmp2())
       NEG-OPCODE-INT : ;YYY
         plop("B NEG-INT")
         neg(a, LOCAL(tmp1(), value))
         SET-LOCAL-INT-EXT(x, tmp1())
       NEG-OPCODE-LONG : ;YYY
         plop("B NEG-LONG")
-        neg(a, LOCAL(rax(), value))
-        SET-LOCAL(x, rax())
+        neg(a, LOCAL(tmp2(), value))
+        SET-LOCAL(x, tmp2())
       NEG-OPCODE-FLOAT : ;YYY
         plop("B NEG-FLOAT")
         xor-op(a, tmp1(), tmp1())
@@ -888,17 +887,17 @@ public defn encode (fid:Int, func:VMFunction,
         debug(a, "CONV-LONG-BYTE %llx %llx\n", tmp1(), LOCAL(tmp2(), x))
       CONV-OPCODE-LONG-INT : ;YYY
         plop("B CONV-LONG-INT X %_ VALUE %_" % [x, value])
-        movsx(a, rax(), LOCAL(tmp1i(), value))
-        SET-LOCAL(x, rax())
-        debug(a, "CONV-LONG-INT %llx %llx\n" tmp1(), rax())
+        movsx(a, tmp2(), LOCAL(tmp1i(), value))
+        SET-LOCAL(x, tmp2())
+        debug(a, "CONV-LONG-INT %llx %llx\n" tmp1(), tmp2())
       CONV-OPCODE-LONG-FLOAT : ;YYY
         plop("B CONV-LONG-FLOAT")
-        cvtss2si(a, rax(), LOCAL-FLOAT(xmm0(), value))
-        SET-LOCAL(x, rax())
+        cvtss2si(a, tmp2(), LOCAL-FLOAT(xmm0(), value))
+        SET-LOCAL(x, tmp2())
       CONV-OPCODE-LONG-DOUBLE : ;YYY
         plop("B CONV-LONG-DOUBLE")
-        cvtsd2si(a, rax(), LOCAL-DOUBLE(xmm0(), value))
-        SET-LOCAL(x, rax())
+        cvtsd2si(a, tmp2(), LOCAL-DOUBLE(xmm0(), value))
+        SET-LOCAL(x, tmp2())
       CONV-OPCODE-FLOAT-BYTE : ;YYY
         plop("B CONV-FLOAT-BYTE")
         cvtsi2ss(a, xmm0(), LOCAL(tmp1b(), value))
@@ -909,7 +908,7 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL-FLOAT(x, xmm0())
       CONV-OPCODE-FLOAT-LONG : ;YYY
         plop("B CONV-FLOAT-LONG")
-        cvtsi2ss(a, xmm0(), LOCAL(rax(), value))
+        cvtsi2ss(a, xmm0(), LOCAL(tmp2(), value))
         SET-LOCAL-FLOAT(x, xmm0())
       CONV-OPCODE-FLOAT-DOUBLE : ;YYY
         plop("B CONV-FLOAT-DOUBLE")
@@ -926,7 +925,7 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL-DOUBLE(x, xmm0())
       CONV-OPCODE-DOUBLE-LONG : ;YYY
         plop("B CONV-DOUBLE-LONG")
-        cvtsi2sd(a, xmm0(), LOCAL(rax(), value))
+        cvtsi2sd(a, xmm0(), LOCAL(tmp2(), value))
         SET-LOCAL-DOUBLE(x, xmm0())
       CONV-OPCODE-DOUBLE-FLOAT : ;YYY
         plop("B CONV-DOUBLE-FLOAT")
@@ -1103,10 +1102,12 @@ public defn encode (fid:Int, func:VMFunction,
     defn do-reserve (size:Gp, num-locals:Int) :
       mov(a, tmp2(), heap-top())
       add(a, tmp2(), size)
-      debug(a, "RESERVE SIZE %llx DESIRED %llx LIMIT %llx\n", size, tmp2(), heap-limit())
+      debug(a, "RESERVE SIZE %d TOP %llx " size, heap-top())
+      debug(a, "DESIRED %llx LIMIT %llx\n" tmp2(), heap-limit())
       cmp(a, tmp2(), heap-limit())
       jle(a, x)
       debug(a, "EXTENDING HEAP\n")
+      trace(a, "EXTENDING HEAP\n")
       SET-REG(0, BOOLREF(CONST(tmp1(), 0)))
       SET-REG(1, CONST(tmp1(), 1L))
       SET-REG(2, size)
@@ -1121,13 +1122,11 @@ public defn encode (fid:Int, func:VMFunction,
         plop("C RESERVE-LOCAL Y %_ VALUE %_" % [y, value])
         val size = tmp3()
         add(a, LOCAL(size, value), 8 + 7)
-        debug(a, "RESERVE-LOCAL %llx\n", size)
         and-op(a, size, CONST(tmp2(), (- 8L)))
-        debug(a, "RESERVE-LOCAL %llx\n", size)
         do-reserve(size, y)
       RESERVE-OPCODE-CONST : ;YYY
         plop("C RESERVE-CONST Y %_ VALUE %_" % [y, value])
-        do-reserve(CONST(rbx(), value), y)
+        do-reserve(CONST(tmp3(), value), y)
 
   defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Label) :
     trace-opcode(opcode)
@@ -1160,12 +1159,12 @@ public defn encode (fid:Int, func:VMFunction,
   defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Int) :
     trace-opcode(opcode)
     defn do-alloc (type:Int, num-bytes:Gp) :
-      val top = tmp3()
+      val top = tmp2()
       mov(a, top, heap-top())
-      trace(a, "TOP = %llx\n", top)
-      mov(a, MemPtr(top, 0, SIZEOF-LONG), CONST(tmp2(), value))
-      trace(a, "TYPE = %llx\n", tmp2())
-      SET-LOCAL(x, ptr-to-ref(tmp2(), top))
+      debug(a, "TOP = %llx NUM-BYTES %d\n", top, num-bytes)
+      mov(a, MemPtr(top, 0, SIZEOF-LONG), CONST(tmp1(), value))
+      debug(a, "TYPE = %llx\n", tmp1())
+      SET-LOCAL(x, ptr-to-ref(tmp1(), top))
       add(a, top, num-bytes)
       mov(a, MemPtr(vmstate(), VMSTATE-HEAP-TOP-OFFSET, SIZEOF-LONG), top)
     switch(opcode) :
@@ -1258,11 +1257,11 @@ public defn encode (fid:Int, func:VMFunction,
         val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-ge)
         debug(a, "GE? %d\n" res)
         SET-LOCAL(x, BOOLREF(res))
-      EQ-OPCODE-REF-REF : ;YYY
-        plop("C EQ-REF-REF")
+      REF-EQ-OPCODE : ;YYY
+        plop("C REF-EQ-OPCODE")
         debug(a, "EQ? %llx %llx\n" LOCAL(tmp1(), y), LOCAL(tmp2(), value))
         val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-e)
-        debug(a, "> EQ-REF-REF? %d\n" res)
+        debug(a, "> REF-EQ? %d\n" res)
         SET-LOCAL(x, BOOLREF(res))
       EQ-OPCODE-REF : ;YYY
         plop("C EQ-REF")
@@ -1288,10 +1287,10 @@ public defn encode (fid:Int, func:VMFunction,
         plop("C EQ-DOUBLE")
         val res = cmpd-set(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value), tmp3(), tmp3b(), set-e)
         SET-LOCAL(x, res)
-      NE-OPCODE-REF-REF : ;YYY
-        plop("C NE-REF-REF")
+      REF-NE-OPCODE : ;YYY
+        plop("C REF-NE")
         val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-ne)
-        debug(a, "EQ? %d\n" res)
+        debug(a, "REF-EQ? %d\n" res)
         SET-LOCAL(x, BOOLREF(res))
       NE-OPCODE-REF : ;YYY
         plop("C NE-REF")
@@ -1383,12 +1382,8 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL-INT-EXT(x, tmp1())
       MUL-OPCODE-LONG : ;YYY
         plop("C MUL-LONG X %_ Y %_ VALUE %_" % [x, y, value])
-        trace(a, "MUL-LONG X %d Y %d VALUE %d\n", CONST(tmp1(), x), CONST(tmp2(), y), CONST(rax(), value))
-        LOCAL(tmp1(), y)
-        LOCAL(tmp2(), value)
-        trace(a, "MUL-LONG %llx %llx -> ", tmp1(), tmp2())
         imul(a, LOCAL(tmp3(), y), LOCAL(tmp2(), value))
-        trace(a, "%llx\n", tmp3())
+        debug(a, "MUL-LONG %llx\n" tmp3())
         SET-LOCAL(x, tmp3())
       MUL-OPCODE-FLOAT : ;YYY
         plop("C MUL-FLOAT")
@@ -1646,11 +1641,10 @@ public defn encode (fid:Int, func:VMFunction,
       ALLOC-OPCODE-LOCAL : ;YYY
         plop("C ALLOC-LOCAL X %_ Y %_ VALUE %_" % [x, y, value])
         debug(a, "ALLOC-LOCAL\n")
-        trace(a, "ALLOC-LOCAL\n")
         val num-bytes = tmp3()
         LOCAL(num-bytes, y)
         add(a, num-bytes, 8 + 7)
-        and-op(a, num-bytes, CONST(rax(), (- 8L)))
+        and-op(a, num-bytes, CONST(rdi(), (- 8L)))
         do-alloc(value, num-bytes)
       ALLOC-OPCODE-CONST : ;YYY
         plop("C ALLOC-CONST X %_ Y %_ VALUE %_" % [x, y, value])
@@ -2490,14 +2484,14 @@ val INT-LT-OPCODE = 46
 val INT-GT-OPCODE = 47
 val INT-LE-OPCODE = 48
 val INT-GE-OPCODE = 49
-val EQ-OPCODE-REF-REF = 50
+val REF-EQ-OPCODE = 50
 val EQ-OPCODE-REF = 51
 val EQ-OPCODE-BYTE = 52
 val EQ-OPCODE-INT = 53
 val EQ-OPCODE-LONG = 54
 val EQ-OPCODE-FLOAT = 55
 val EQ-OPCODE-DOUBLE = 56
-val NE-OPCODE-REF-REF = 57
+val REF-NE-OPCODE = 57
 val NE-OPCODE-REF = 58
 val NE-OPCODE-BYTE = 59
 val NE-OPCODE-INT = 60
@@ -2849,14 +2843,14 @@ defn op2-opcode (op:VMOp, xt:VMType, yt:VMType) :
     (op:IntGtOp, xt:VMRef, yt:VMRef) : INT-GT-OPCODE
     (op:IntLeOp, xt:VMRef, yt:VMRef) : INT-LE-OPCODE
     (op:IntGeOp, xt:VMRef, yt:VMRef) : INT-GE-OPCODE
-    (op:EqOp, xt:VMRef, yt:VMRef) : EQ-OPCODE-REF-REF
+    (op:RefEqOp, xt:VMRef, yt:VMRef) : REF-EQ-OPCODE
+    (op:RefNeOp, xt:VMRef, yt:VMRef) : REF-NE-OPCODE
     (op:EqOp, xt:VMLong, yt:VMRef) : EQ-OPCODE-REF
     (op:EqOp, xt:VMLong, yt:VMByte) : EQ-OPCODE-BYTE
     (op:EqOp, xt:VMLong, yt:VMInt) : EQ-OPCODE-INT
     (op:EqOp, xt:VMLong, yt:VMLong) : EQ-OPCODE-LONG
     (op:EqOp, xt:VMLong, yt:VMFloat) : EQ-OPCODE-FLOAT
     (op:EqOp, xt:VMLong, yt:VMDouble) : EQ-OPCODE-DOUBLE
-    (op:NeOp, xt:VMRef, yt:VMRef) : NE-OPCODE-REF-REF
     (op:NeOp, xt:VMLong, yt:VMRef) : NE-OPCODE-REF
     (op:NeOp, xt:VMLong, yt:VMByte) : NE-OPCODE-BYTE
     (op:NeOp, xt:VMLong, yt:VMInt) : NE-OPCODE-INT
@@ -3025,14 +3019,14 @@ opcode-names[INT-LT-OPCODE] = "INT-LT-OPCODE"
 opcode-names[INT-GT-OPCODE] = "INT-GT-OPCODE"
 opcode-names[INT-LE-OPCODE] = "INT-LE-OPCODE"
 opcode-names[INT-GE-OPCODE] = "INT-GE-OPCODE"
-opcode-names[EQ-OPCODE-REF-REF] = "EQ-OPCODE-REF-REF"
+opcode-names[REF-EQ-OPCODE] = "REF-EQ-OPCODE"
 opcode-names[EQ-OPCODE-REF] = "EQ-OPCODE-REF"
 opcode-names[EQ-OPCODE-BYTE] = "EQ-OPCODE-BYTE"
 opcode-names[EQ-OPCODE-INT] = "EQ-OPCODE-INT"
 opcode-names[EQ-OPCODE-LONG] = "EQ-OPCODE-LONG"
 opcode-names[EQ-OPCODE-FLOAT] = "EQ-OPCODE-FLOAT"
 opcode-names[EQ-OPCODE-DOUBLE] = "EQ-OPCODE-DOUBLE"
-opcode-names[NE-OPCODE-REF-REF] = "NE-OPCODE-REF-REF"
+opcode-names[REF-NE-OPCODE] = "REF-NE-OPCODE"
 opcode-names[NE-OPCODE-REF] = "NE-OPCODE-REF"
 opcode-names[NE-OPCODE-BYTE] = "NE-OPCODE-BYTE"
 opcode-names[NE-OPCODE-INT] = "NE-OPCODE-INT"

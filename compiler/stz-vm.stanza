@@ -451,7 +451,6 @@ public lostanza defn run-bytecode (vm:ref<VirtualMachine>, start-func:ref<Int>) 
   set-starting-func(vm, start-func)
   ; call-c vmloop(vm.vmstate, call-prim crsp() as long)
   val vms = new Long{vm.vmstate as long}
-  call-c printf("RUN VMS = %lld\n" vm.vmstate)
   val func = make-jit-launch(jit-runtime(vm), vms, start-func)
   val res = call(func, call-prim crsp())
   null-stack-pointer(vm)
@@ -1119,7 +1118,7 @@ defn class-names (cs:Seqable<VMClass>, ids:VMIds) -> Seqable<KeyValue<Int,String
 
 public defn load (vm:VirtualMachine, vmps:Collection<VMPackage>, keep-existing-globals?:True|False) :
   if not empty?(to-seq(vmps)) :
-    println("--- LOADING VM ---")
+    ; println("--- LOADING VM ---")
     ;Precondition
     ensure-core-loaded-first!(vm, vmps)
 
@@ -1161,7 +1160,7 @@ public defn load (vm:VirtualMachine, vmps:Collection<VMPackage>, keep-existing-g
     update(branch-table(vm))
     update-vmstate(vm)
 
-    println("--- RUN-BYTECODE %_ ---" % [core-loaded?(vm)])
+    ; println("--- RUN-BYTECODE %_ ---" % [core-loaded?(vm)])
 
     ;If core has been loaded, then initialize the constants by running
     ;the initialize-constants function.
@@ -1190,7 +1189,7 @@ public defn init-package (vm:VirtualMachine, package:Symbol) -> True|False :
     val trace? = false
     if package == `core :
       val res = run-bytecode(vm, f)
-      println("RAN CORE %_" % [res])
+      ; println("RAN CORE %_" % [res])
       set-core-loaded?(vm, true)      
       true
     else :
