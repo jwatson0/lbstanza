@@ -189,7 +189,7 @@ defn tmp3 () :           rdx()
 defn tmp3i () :          edx()
 defn tmp3b () :          dl()
 defn etc-saved-registers () : [vmstate(), registers(), functions(), stack-pointer(), stk(), tmp1(), tmp2()]
-defn low-saved-registers () : [rax(), rbx(), rcx(), rdx(), rsi(), rdi()]
+defn low-saved-registers () : [rbx(), rcx(), rdx(), rsi(), rdi()]
 defn all-saved-registers () : cat(low-saved-registers(), etc-saved-registers())
 
 defn untag-stack (a:Assembler, dst:Gp, stk:Gp) -> Gp :
@@ -247,9 +247,12 @@ defn trace (a:Assembler, format:String, a0:Gp, a1:Gp, a2:Gp) :
   if tracing? :
     all-save-registers(a)
     mov(a, rdi(), printf-format(format))
-    mov(a, rsi(), a0)
-    mov(a, rdx(), a1)
-    mov(a, rcx(), a2)
+    mov(a, r8(), a0)
+    mov(a, r9(), a1)
+    mov(a, r10(), a2)
+    mov(a, rsi(), r8())
+    mov(a, rdx(), r9())
+    mov(a, rcx(), r10())
     mov(a, rax(), 0L)
     mov(a, tmp1(), printf-addr())
     call(a, tmp1())
@@ -263,9 +266,12 @@ defn debug (a:Assembler, format:String, a0:Gp, a1:Gp, a2:Gp) :
   if debugging? :
     all-save-registers(a)
     mov(a, rdi(), printf-format(format))
-    mov(a, rsi(), a0)
-    mov(a, rdx(), a1)
-    mov(a, rcx(), a2)
+    mov(a, r8(), a0)
+    mov(a, r9(), a1)
+    mov(a, r10(), a2)
+    mov(a, rsi(), r8())
+    mov(a, rdx(), r9())
+    mov(a, rcx(), r10())
     mov(a, rax(), 0L)
     mov(a, tmp1(), printf-addr())
     call(a, tmp1())
@@ -647,11 +653,11 @@ public defn encode (fid:Int, func:VMFunction,
   defn trace-opcode (opcode:Int) :
     val name = string-join([ "%d: " opcode-names[opcode] "\n" ])
     if tracing? :
-      mov(a, tmp3(), vmstate-reg(a, VMSTATE-INSTRUCTIONS-OFFSET))
-    trace(a, name, tmp3())
-    if tracing? :
-      add(a, tmp3(), 1)
-      mov(a, MemPtr(vmstate(), VMSTATE-INSTRUCTIONS-OFFSET, SIZEOF-LONG), tmp3())
+      val counter = rcx()
+      mov(a, counter, vmstate-reg(a, VMSTATE-INSTRUCTIONS-OFFSET))
+      trace(a, name, counter)
+      add(a, counter, 1)
+      mov(a, MemPtr(vmstate(), VMSTATE-INSTRUCTIONS-OFFSET, SIZEOF-LONG), counter)
     add(covered, opcode)
 
   defn emit-ins-a (opcode:Int, value:Label) :
@@ -1377,7 +1383,7 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL-INT-EXT(x, tmp1())
       MUL-OPCODE-LONG : ;YYY
         plop("C MUL-LONG X %_ Y %_ VALUE %_" % [x, y, value])
-        trace(a, "MUL-LONG X %d Y %d VALUE %d\n", CONST(tmp1(), x), CONST(tmp2(), y), CONST(tmp3(), value))
+        trace(a, "MUL-LONG X %d Y %d VALUE %d\n", CONST(tmp1(), x), CONST(tmp2(), y), CONST(rax(), value))
         LOCAL(tmp1(), y)
         LOCAL(tmp2(), value)
         trace(a, "MUL-LONG %llx %llx -> ", tmp1(), tmp2())
