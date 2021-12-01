@@ -387,7 +387,7 @@ public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func)
   val code = code-holder-new(rt)
   val a = assembler-new(code)
   val end-label = new-label(a)
-  dump(a, "EXTEND-STACK 0x%llx\n", size-required) when tracing?
+  dump(a, "EXTEND-STACK 0x%llx\n", size-required) 
   ;Save current stack
   mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET, SIZEOF-LONG), stack-pointer())
   ; lea(a, tmp1(), MemPtr(continue, 0, SIZEOF-LONG))
@@ -521,13 +521,13 @@ public defn encode (fid:Int, func:VMFunction,
   defn SET-REG (r:Int, v:Gp) :
     mov(a, MemPtr(registers(), r * SIZEOF-LONG, SIZEOF-LONG), v)
     dump(a, "SET-REG[%d] = 0x%llx\n", CONST(rbx(), r), v) when debugging?
-    dump(a, "  SET-REG[%d] = 0x%llx\n", CONST(rbx(), r), v) when tracing? when tracing?
+    dump(a, "  SET-REG[%d] = 0x%llx\n", CONST(rbx(), r), v) when tracing?
     ; registers[r] = v
     false
   defn SET-LOCAL (l:Int, v:Gp) :
     mov(a, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG), v)
     dump(a, "  SET-LOCAL[%d] = 0x%llx\n", CONST(rbx(), l), v) when debugging? 
-    dump(a, "  SET-LOCAL[%d] = 0x%llx\n", CONST(rax(), l), v) when tracing? when tracing?
+    dump(a, "  SET-LOCAL[%d] = 0x%llx\n", CONST(rax(), l), v) when tracing? 
     ; stack_pointer->slots[l] = v;
     false
   defn SET-LOCAL-BYTE (l:Int, v:Gp) :
