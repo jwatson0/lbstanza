@@ -15,7 +15,7 @@ defpackage stz/vm-jit :
   import core/stack-trace
 
 val debugging? = false
-val tracing? = true
+val tracing? = false
 
 defn plop (x) : println(x) when debugging?
 
@@ -377,7 +377,9 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
   ; call init
   plop("INIT-ID %_" % [init-id])
   mov(a, tmp1(), MemPtr(vmstate(), VMSTATE-HEAP-TOP-OFFSET, SIZEOF-LONG))
-  trace(a, "0x%llxL\n", tmp1())
+  trace(a, "0x%llx\n", tmp1())
+  mov(a, tmp1(), MemPtr(vmstate(), VMSTATE-GLOBAL-MEM-OFFSET, SIZEOF-LONG))
+  trace(a, ">>> 0x%llx\n", tmp1())
   mov(a, rax(), MemPtr(functions(), init-id * SIZEOF-LONG, SIZEOF-LONG))
   jmp(a, rax())
   bind(a, ret-label)
@@ -1049,9 +1051,7 @@ public defn encode (fid:Int, func:VMFunction,
         SET-REG(x, LOCAL(value))
       SET-REG-OPCODE-UNSIGNED : ;YYY
         plop("C SET-REG-UNSIGNED")
-        mov(a, tmp1(), to-long(value))
-        mov(a, tmp2(), to-long(x))
-        mov(a, tmp1(), to-long(value))
+        mov(a, tmp1(), to-long(value) & 0xffffffffL)
         SET-REG(x, tmp1())
         ; debug(a, "REGISTERS:\n")
         ; dump-memory-64(a, registers(), 6L)
@@ -1064,7 +1064,7 @@ public defn encode (fid:Int, func:VMFunction,
       SET-REG-OPCODE-GLOBAL : ;YYY
         plop("C SET-REG-GLOBAL")
         mov(a, rbx(), MemPtr(global-offsets(), CONST(tmp1(), value), 3, 0, SIZEOF-LONG))
-        lea(a, tmp1(), MemPtr(global-mem(), rbx(), 3, 0, SIZEOF-LONG))
+        lea(a, tmp1(), MemPtr(global-mem(), rbx(), 0, 0, SIZEOF-LONG))
         SET-REG(x, tmp1())
       SET-REG-OPCODE-DATA : ;YYY
         plop("C SET-REG-DATA x=%_ value=%_" % [x, value])
@@ -1080,7 +1080,7 @@ public defn encode (fid:Int, func:VMFunction,
       SET-REG-OPCODE-UNSIGNED : ;YYY
         plop("C SET-REG-UNSIGNED")
         ;TODO: CHECK
-        mov(a, tmp1(), to-long(value))
+        mov(a, tmp1(), to-long(value) & 0xffffffffL)
         SET-REG(x, tmp1())
       SET-REG-OPCODE-SIGNED : ;YYY
         plop("C SET-REG-UNSIGNED")
@@ -1092,7 +1092,7 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, LOCAL(value))
       SET-OPCODE-UNSIGNED : ;YYY
         plop("C SET-UNSIGNED X %_ VALUE 0x%_" % [x, hex(to-long(value))])
-        mov(a, tmp1(), to-long(value))
+        mov(a, tmp1(), to-long(value) & 0xffffffffL)
         SET-LOCAL(x, tmp1())
       SET-OPCODE-WIDE : ;YYY
         plop("C SET-WIDE X %_ VALUE %_" % [x, value])
@@ -1103,7 +1103,7 @@ public defn encode (fid:Int, func:VMFunction,
       SET-OPCODE-GLOBAL : ;YYY
         plop("C SET-GLOBAL")
         mov(a, rbx(), MemPtr(global-offsets(), CONST(tmp1(), value), 3, 0, SIZEOF-LONG))
-        lea(a, tmp1(), MemPtr(global-mem(), rbx(), 3, 0, SIZEOF-LONG))
+        lea(a, tmp1(), MemPtr(global-mem(), rbx(), 0, 0, SIZEOF-LONG))
         SET-LOCAL(x, tmp1())
       SET-OPCODE-DATA : ;YYY
         plop("C SET-DATA")
