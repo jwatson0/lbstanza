@@ -846,7 +846,7 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL-BYTE(x, tmp1())
       NOT-OPCODE-INT : ;YYY
         plop("B NOT-INT")
-        xor-op(a, tmp1(), tmp1())
+        xor-op(a, tmp1(), tmp1()) ; TODO: REMOVE?
         not-op(a, LOCAL(tmp1i(), value))
         SET-LOCAL-INT(x, tmp1())
         debug(a, "NOT-INT 0x%llx 0x%llx\n", tmp1(), LOCAL(tmp2(), x)) when debugging?
@@ -864,13 +864,13 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, tmp2())
       NEG-OPCODE-FLOAT : ;YYY
         plop("B NEG-FLOAT")
-        xor-op(a, tmp1(), tmp1())
+        xor-op(a, tmp1(), tmp1()) ; TOOD: REMOVE?
         cvtsi2ss(a, xmm0(), tmp1())
         subss(a, xmm0(), LOCAL-FLOAT(xmm1(), value))
         SET-LOCAL-FLOAT(x, xmm0())
       NEG-OPCODE-DOUBLE : ;YYY
         plop("B NEG-DOUBLE")
-        xor-op(a, tmp1(), tmp1())
+        xor-op(a, tmp1(), tmp1()) ; TODO: REMOVE?
         cvtsi2sd(a, xmm0(), tmp1())
         subsd(a, xmm0(), LOCAL-DOUBLE(xmm1(), value))
         SET-LOCAL-DOUBLE(x, xmm0())
@@ -884,7 +884,7 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL-BYTE(x, tmp1())
       CONV-OPCODE-INT-BYTE : ;YYY
         plop("B CONV-INT-BYTE")
-        xor-op(a, tmp1(), tmp1())
+        xor-op(a, tmp1(), tmp1()) ; TODO: REMOVE?
         mov(a, tmp1i(), LOCAL(tmp1b(), value))
         SET-LOCAL-INT(x, tmp1())
       CONV-OPCODE-INT-FLOAT : ;YYY
@@ -902,7 +902,7 @@ public defn encode (fid:Int, func:VMFunction,
         debug(a, "CONV-LONG-BYTE 0x%llx 0x%llx\n", tmp1(), LOCAL(tmp2(), x)) when debugging?
       CONV-OPCODE-LONG-INT : ;YYY
         plop("B CONV-LONG-INT X %_ VALUE %_" % [x, value])
-        movsx(a, tmp2(), LOCAL(tmp1i(), value))
+        movsxd(a, tmp2(), LOCAL(tmp1i(), value)) ; TODO: REMOVE?
         SET-LOCAL(x, tmp2())
         debug(a, "CONV-LONG-INT 0x%llx 0x%llx\n" tmp1(), tmp2()) when debugging?
       CONV-OPCODE-LONG-FLOAT : ;YYY
@@ -1074,20 +1074,18 @@ public defn encode (fid:Int, func:VMFunction,
         SET-REG(x, tmp1())
       SET-REG-OPCODE-UNSIGNED : ;YYY
         plop("C SET-REG-UNSIGNED")
-        ;TODO: CHECK
-        mov(a, tmp1(), to-long(value) & 0xffffffffL)
+        mov(a, tmp1(), to-long(value) & 0xffffffffL) ; TODO: CHECK
         SET-REG(x, tmp1())
       SET-REG-OPCODE-SIGNED : ;YYY
         plop("C SET-REG-UNSIGNED")
-        ;TODO: CHECK
-        mov(a, tmp1(), to-long(value))
+        mov(a, tmp1(), to-long(value)) ;TODO: CHECK
         SET-REG(x, tmp1())
       SET-OPCODE-LOCAL : ;YYY
         plop("C SET-LOCAL X %_ VALUE %_" % [x, value])
         SET-LOCAL(x, LOCAL(value))
       SET-OPCODE-UNSIGNED : ;YYY
         plop("C SET-UNSIGNED X %_ VALUE 0x%_" % [x, hex(to-long(value))])
-        mov(a, tmp1(), to-long(value) & 0xffffffffL)
+        mov(a, tmp1(), to-long(value) & 0xffffffffL) ; TODO: CHECK?
         SET-LOCAL(x, tmp1())
       SET-OPCODE-WIDE : ;YYY
         plop("C SET-WIDE X %_ VALUE %_" % [x, value])
