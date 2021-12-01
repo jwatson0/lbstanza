@@ -537,23 +537,20 @@ public defn encode (fid:Int, func:VMFunction,
   defn branch-is-final? (b:VMBranch) :
     all?(type-is-final?, types(b))
 
-  defn stack-frame-slots (dst:Gp) -> Gp :
-    lea(a, dst, MemPtr(stack-pointer(), STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG))
-    dst
   defn GET-CRSP (dst:Gp) -> Gp :
     mov(a, dst, MemPtr(rsp(), 0, SIZEOF-LONG))
     dst
   defn GET-REG (dst:Gp, r:Int) :
-    mov(a, dst, MemPtr(registers(), CONST(rbx(), r), 3, 0, SIZEOF-LONG))
+    mov(a, dst, MemPtr(registers(), r * SIZEOF-LONG, SIZEOF-LONG))
     dst
   defn SET-REG (r:Int, v:Gp) :
-    mov(a, MemPtr(registers(), CONST(rbx(), r), 3, 0, SIZEOF-LONG), v)
+    mov(a, MemPtr(registers(), r * SIZEOF-LONG, SIZEOF-LONG), v)
     debug(a, "SET-REG[%d] = 0x%llx\n", CONST(rbx(), r), v)
     trace(a, "  SET-REG[%d] = 0x%llx\n", CONST(rbx(), r), v)
     ; registers[r] = v
     false
   defn SET-LOCAL (l:Int, v:Gp) :
-    mov(a, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG), v)
+    mov(a, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG), v)
     debug(a, "  SET-LOCAL[%d] = 0x%llx\n", CONST(rbx(), l), v)
     trace(a, "  SET-LOCAL[%d] = 0x%llx\n", CONST(rax(), l), v)
     ; stack_pointer->slots[l] = v;
@@ -565,7 +562,6 @@ public defn encode (fid:Int, func:VMFunction,
   defn SET-LOCAL-INT (l:Int, v:Gp) :
     ;TODO: COULD MERGE ABOVE WITH THIS
     ; trace(a, "  SET-LOCAL-INT => 0x%llxL\n", v)
-    and-op(a, v, 0xffffffff)
     ; trace(a, "  SET-LOCAL-INT-AND => 0x%llxL\n", v)
     movsxd(a, v, v)
     ; trace(a, "  SET-LOCAL-INT-EXT => 0x%llxL\n", v)
@@ -575,32 +571,31 @@ public defn encode (fid:Int, func:VMFunction,
     movsx(a, v, v)
     SET-LOCAL(l, v)
   defn SET-LOCAL-FLOAT (l:Int,v:Xmm) :
-    movsd(a, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG), v)
+    movsd(a, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG), v)
     debug(a, "SET-LOCAL-FLOAT[%d] 0x%llx\n", CONST(rbx(), l), LOCAL(tmp1(), l))
     ; float* addr = (float*)&(stack_pointer->slots[l])
     ; *addr = v
     false
   defn SET-LOCAL-DOUBLE (l:Int, v:Xmm) :
-    movsd(a, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG), v)
+    movsd(a, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG), v)
     ; double* addr = (double*)&(stack_pointer->slots[l])
     ; *addr = v
     false
 
   defn LOCAL (dst:Gp, l:Int) -> Gp :
-    ; mov(a, dst, MemPtr(stack-frame-slots(rbx()), CONST(rsi(), l), 3, 0, SIZEOF-LONG)) 
-    mov(a, dst, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG)) 
+    mov(a, dst, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG)) 
     dst
   defn LOCAL (l:Int) -> Gp : LOCAL(tmp2(), l)
    ; stack_pointer->slots[l]
   defn LOCAL-FLOAT (dst:Xmm, l:Int) -> Xmm :
-    movss(a, dst, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-INT))
+    movss(a, dst, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET, SIZEOF-INT))
     dst
     ; float* addr = (float*)&(stack_pointer->slots[l])
     ; *addr
   defn LOCAL-FLOAT (l:Int) -> Xmm :
     LOCAL-FLOAT(xmm0(), l)
   defn LOCAL-DOUBLE (dst:Xmm, l:Int) -> Xmm :
-    movsd(a, dst, MemPtr(stack-pointer(), CONST(rsi(), l), 3, STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG))
+    movsd(a, dst, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET, SIZEOF-LONG))
     dst
     ; double* addr = (double*)&(stack_pointer->slots[l])
     ; *addr
