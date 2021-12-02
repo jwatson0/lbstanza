@@ -201,11 +201,29 @@ defn set-system-registers (a:Assembler, value:Gp) : vmstate-set(a, VMSTATE-SYSTE
 defn get-trie-table (a:Assembler, dst:Gp) : vmstate-get(a, VMSTATE-TRIE-TABLE-OFFSET, dst)
 defn set-trie-table (a:Assembler, value:Gp) : vmstate-set(a, VMSTATE-TRIE-TABLE-OFFSET, value)
 
+defn stack-frame-get (a:Assembler, offset:Int, dst:Gp) -> Gp :
+  mov(a, dst, MemPtr(stack-pointer(), offset))
+  dst
+defn stack-frame-get (a:Assembler, offset:Int) -> Gp :
+  stack-frame-get(a, offset, rcx())
+
+defn stack-frame-set (a:Assembler, offset:Int, value:Gp) :
+  mov(a, MemPtr(stack-pointer(), offset), value)
+
 val stack-frame-offsets = Counter(0)
 val STACK-FRAME-RETURN-OFFSET = next(stack-frame-offsets, SIZEOF-LONG)
 val STACK-FRAME-LIVENESS-MAP-OFFSET = next(stack-frame-offsets, SIZEOF-LONG)
 val SIZEOF-STACK-FRAME = value(stack-frame-offsets)
 val STACK-FRAME-SLOTS-OFFSET = next(stack-frame-offsets, SIZEOF-LONG)
+
+defn stack-get (a:Assembler, offset:Int, dst:Gp) -> Gp :
+  mov(a, dst, MemPtr(stk(), offset))
+  dst
+defn stack-get (a:Assembler, offset:Int) -> Gp :
+  stack-get(a, offset, rcx())
+
+defn stack-set (a:Assembler, offset:Int, value:Gp) :
+  mov(a, MemPtr(stk(), offset), value)
 
 val stack-offsets = Counter(0)
 val STACK-SIZE-OFFSET = next(stack-offsets, SIZEOF-LONG)
@@ -383,7 +401,7 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
   dump(a, "JIT STK %p\n" stk()) when debugging?
   ; dump-memory-64(a, stk(), 4L)
   plop("STACK-STACK-POINTER-OFFSET %_" % [STACK-STACK-POINTER-OFFSET])
-  mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET))
+  stack-get(a, STACK-STACK-POINTER-OFFSET, stack-pointer())
   dump(a, "JIT STACK-POINTER %p\n" stack-pointer()) when debugging?
   dump(a, "REGISTERS:\n") when debugging?
   dump-memory-64(a, vmstate-get(a, VMSTATE-REGISTERS-OFFSET), 4L)
@@ -393,13 +411,13 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
   val ret-label = new-label(a)
   lea(a, tmp2(), MemPtr(ret-label))
   dump(a, "RET-LABEL %p\n" tmp2()) when debugging?
-  mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET), tmp2())
+  stack-frame-set(a, STACK-FRAME-RETURN-OFFSET, tmp2())
   ; mov(a, MemPtr(vmstate(), VMSTATE-INSTRUCTIONS-OFFSET), CONST(a, tmp1(), 0))
   ; call init
   plop("INIT-ID %_" % [init-id])
-  mov(a, tmp1(), MemPtr(vmstate(), VMSTATE-HEAP-TOP-OFFSET))
+  vmstate-get(a, VMSTATE-HEAP-TOP-OFFSET, tmp1())
   dump(a, "%p\n", tmp1()) when tracing?
-  mov(a, tmp1(), MemPtr(vmstate(), VMSTATE-GLOBAL-MEM-OFFSET))
+  vmstate-get(a, VMSTATE-GLOBAL-MEM-OFFSET, tmp1())
   dump(a, ">>> %p\n", tmp1()) when tracing?
   mov(a, rax(), MemPtr(functions(), init-id * SIZEOF-LONG))
   jmp(a, rax())
@@ -436,25 +454,25 @@ public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func)
   val a = assembler-new(code)
   dump(a, "EXTEND-STACK %p LABEL %p\n", size-required, end-label) 
   ;Save current stack
-  mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET), stack-pointer())
-  mov(a, MemPtr(stk(), STACK-PC-OFFSET), end-label)
+  stack-set(a, STACK-STACK-POINTER-OFFSET, stack-pointer())
+  stack-set(a, STACK-PC-OFFSET, end-label)
   dump(a, "SAVING STK %p PC %p\n", stk(), end-label) 
   ;Swap stack and registers
-  mov(a, MemPtr(vmstate(), VMSTATE-CURRENT-STACK-OFFSET), vmstate-get(a, VMSTATE-SYSTEM-STACK-OFFSET))
-  mov(a, MemPtr(vmstate(), VMSTATE-SYSTEM-STACK-OFFSET), current-stack())
-  mov(a, MemPtr(vmstate(), VMSTATE-REGISTERS-OFFSET), vmstate-get(a, VMSTATE-SYSTEM-REGISTERS-OFFSET))
-  mov(a, MemPtr(vmstate(), VMSTATE-SYSTEM-REGISTERS-OFFSET), registers())
+  vmstate-set(a, VMSTATE-CURRENT-STACK-OFFSET, vmstate-get(a, VMSTATE-SYSTEM-STACK-OFFSET))
+  vmstate-set(a, VMSTATE-SYSTEM-STACK-OFFSET, current-stack())
+  vmstate-set(a, VMSTATE-REGISTERS-OFFSET, vmstate-get(a, VMSTATE-SYSTEM-REGISTERS-OFFSET))
+  vmstate-set(a, VMSTATE-SYSTEM-REGISTERS-OFFSET, registers())
   ;Restore stack state
   mov(a, current-stack(), vmstate-get(a, VMSTATE-CURRENT-STACK-OFFSET))
   untag-stack(a, stk(), current-stack())
-  mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET))
-  mov(a, registers(), MemPtr(vmstate(), VMSTATE-REGISTERS-OFFSET))
+  stack-get(a, STACK-STACK-POINTER-OFFSET, stack-pointer())
+  vmstate-get(a, VMSTATE-REGISTERS-OFFSET, registers())
   ;Set arguments
   SET-REG(a, 0, do-BOOLREF(a, CONST(a, tmp1(), 0)))
   SET-REG(a, 1, CONST(a, tmp1(), 1))
   SET-REG(a, 1, size-required)
-  mov(a, stack-pointer(), MemPtr(stk(), STACK-FRAMES-OFFSET))
-  mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET), CONST(a, tmp1(), value(stack-overflow-return)))
+  stack-get(a, STACK-FRAMES-OFFSET, stack-pointer())
+  stack-frame-set(a, STACK-FRAME-RETURN-OFFSET, CONST(a, tmp1(), value(stack-overflow-return)))
   mov(a, tmp2(), MemPtr(functions(), SIZEOF-LONG * EXTEND-STACK-FN))
   jmp(a, tmp2())
   add(rt, code)
@@ -464,28 +482,28 @@ public defn make-extend-stack-return (rt:JitRuntime) -> Func :
   val a = assembler-new(code)
   ;System stack no longer needed
   dump(a, "EXTEND-STACK-RETURN\n") ; when debugging?
-  mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET), CONST(a, tmp1(), 0))
+  stack-set(a, STACK-STACK-POINTER-OFFSET, CONST(a, tmp1(), 0))
   dump(a, "SWAP-STACK-AND-REGISTERS\n") ; when debugging?
   ;Swap stack and registers
-  mov(a, MemPtr(vmstate(), VMSTATE-CURRENT-STACK-OFFSET), vmstate-get(a, VMSTATE-SYSTEM-STACK-OFFSET))
-  mov(a, MemPtr(vmstate(), VMSTATE-SYSTEM-STACK-OFFSET), current-stack())
-  mov(a, MemPtr(vmstate(), VMSTATE-REGISTERS-OFFSET), vmstate-get(a, VMSTATE-SYSTEM-REGISTERS-OFFSET))
-  mov(a, MemPtr(vmstate(), VMSTATE-SYSTEM-REGISTERS-OFFSET), registers())
+  vmstate-set(a, VMSTATE-CURRENT-STACK-OFFSET, vmstate-get(a, VMSTATE-SYSTEM-STACK-OFFSET))
+  vmstate-set(a, VMSTATE-SYSTEM-STACK-OFFSET, current-stack())
+  vmstate-set(a, VMSTATE-REGISTERS-OFFSET, vmstate-get(a, VMSTATE-SYSTEM-REGISTERS-OFFSET))
+  vmstate-set(a, VMSTATE-SYSTEM-REGISTERS-OFFSET, registers())
   dump(a, "RESTORE-STACK-STATE\n") ; when debugging?
   ;Restore stack state
-  mov(a, current-stack(), MemPtr(vmstate(), VMSTATE-CURRENT-STACK-OFFSET))
+  vmstate-get(a, VMSTATE-CURRENT-STACK-OFFSET, current-stack())
   untag-stack(a, stk(), current-stack())
-  mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET))
-  mov(a, registers(), MemPtr(vmstate(), VMSTATE-REGISTERS-OFFSET))
+  stack-get(a, STACK-STACK-POINTER-OFFSET, stack-pointer())
+  vmstate-get(a, VMSTATE-REGISTERS-OFFSET, registers())
   ;Continue where we were
-  mov(a, tmp1(), MemPtr(stk(), STACK-PC-OFFSET))
+  stack-get(a, STACK-PC-OFFSET, tmp1())
   dump(a, "CONTINUE WHERE WE LEFT OFF STK %p PC %p\n", stk(), tmp1()) ; when debugging?
   jmp(a, tmp1())
   add(rt, code)
 
 defn compute-stack-limit (a:Assembler, dst:Gp) -> Gp :
-  mov(a, dst,    MemPtr(stk(), STACK-FRAMES-OFFSET))
-  mov(a, tmp1(), MemPtr(stk(), STACK-SIZE-OFFSET))
+  stack-get(a, STACK-FRAMES-OFFSET, dst)
+  stack-get(a, STACK-SIZE-OFFSET, tmp1())
   add(a, dst,    tmp1())
   dst
 
@@ -631,7 +649,7 @@ public defn encode (fid:Int, func:VMFunction,
   defn PUSH-FRAME (num-locals:Int, ret-addr:Label) :
     add(a, stack-pointer(), SIZEOF-STACK-FRAME + num-locals * SIZEOF-LONG)
     lea(a, tmp1(), MemPtr(ret-addr, 0))
-    mov(a, MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET), tmp1())
+    stack-frame-set(a, STACK-FRAME-RETURN-OFFSET, tmp1())
     ; mov(a, MemPtr(stack-pointer(), STACK-FRAME-LIVENESS-MAP-OFFSET), CONST(tmp1(), 0x0))
     ; stack_pointer = (StackFrame*)((char*)stack_pointer + sizeof(StackFrame) + (num_locals) * SIZEOF-LONG)
     ; stack_pointer->returnpc = (uint64_t)(pc - instructions)
@@ -646,7 +664,7 @@ public defn encode (fid:Int, func:VMFunction,
   defn SAVE-STATE-ONLY () :
     ; mov(a, MemPtr(vmstate(), VMSTATE-HEAP-TOP-OFFSET), heap-top())
     mov(a, MemPtr(vmstate(), VMSTATE-CURRENT-STACK-OFFSET), current-stack())
-    mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET), stack-pointer())
+    stack-set(a, STACK-STACK-POINTER-OFFSET, stack-pointer())
     ; vms->heap_top = heap_top
     ; vms->current_stack = current_stack
     ; stk->stack_pointer = stack_pointer
@@ -661,9 +679,9 @@ public defn encode (fid:Int, func:VMFunction,
     etc-restore-registers(a)
     ; mov(a, heap-top(), MemPtr(vmstate(), VMSTATE-HEAP-TOP-OFFSET))
     ; mov(a, heap-limit(), MemPtr(vmstate(), VMSTATE-HEAP-LIMIT-OFFSET))
-    mov(a, current-stack(), MemPtr(vmstate(), VMSTATE-CURRENT-STACK-OFFSET))
+    vmstate-get(a, VMSTATE-CURRENT-STACK-OFFSET, current-stack())
     untag-stack(a, stk(), current-stack())
-    mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET))
+    stack-get(a, STACK-STACK-POINTER-OFFSET, stack-pointer())
     ; mov(a, stack-limit(a), compute-stack-limit(a))
     ; heap_top = vms->heap_top
     ; heap_limit = vms->heap_limit
@@ -724,8 +742,8 @@ public defn encode (fid:Int, func:VMFunction,
         add(a, CONST(tmp3(), size-required), stack-pointer())
         val limit = stack-limit(tmp2())
         dump(a, "STACK CHECK STK %p %p %p: ", stk(), tmp3(), limit) when debugging?
-        mov(a, rcx(), MemPtr(stk(), STACK-FRAMES-OFFSET))
-        mov(a, rax(), MemPtr(stk(), STACK-SIZE-OFFSET))
+        stack-get(a, STACK-FRAMES-OFFSET, rcx())
+        stack-get(a, STACK-SIZE-OFFSET, rax())
         dump(a, "FRAMES %p SIZE %p\n", rcx(), rax()) when debugging?
         cmp(a, tmp3(), limit)
         jle(a, all-good-label)
@@ -763,19 +781,19 @@ public defn encode (fid:Int, func:VMFunction,
         plop("A ENTER-STACK")
         dump(a, "ENTER STACK %d\n" CONST(tmp1(), value)) when debugging?
         ;Save current stack
-        mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET), stack-pointer())
+        stack-set(a, STACK-STACK-POINTER-OFFSET, stack-pointer())
         val saved-label = new-label(a)
         lea(a, tmp1(), MemPtr(saved-label, 0))
-        mov(a, MemPtr(stk(), STACK-PC-OFFSET), tmp1())
+        stack-set(a, STACK-PC-OFFSET, tmp1())
         dump(a, "SET STK-PC %p\n" tmp1()) when debugging?
         ;Load next stack
         mov(a, current-stack(), LOCAL(tmp1(), value))
         dump(a, "ENTER STACK %p\n" tmp1()) when debugging?
         untag-stack(a, stk(), current-stack())
         dump(a, "ENTER STK %p\n" stk()) when debugging?
-        mov(a, stack-pointer(), MemPtr(stk(), STACK-FRAMES-OFFSET))
+        stack-get(a, STACK-FRAMES-OFFSET, stack-pointer())
         ;Load starting address
-        mov(a, tmp1(), MemPtr(stk(), STACK-PC-OFFSET))
+        stack-get(a, STACK-PC-OFFSET, tmp1())
         dump(a, "ENTER STACK JUMP FID %p\n" tmp1()) when debugging?
         mov(a, tmp2(), MemPtr(functions(), tmp1(), 3, 0))
         dump(a, "ENTER STACK JUMP ADDR %p\n" tmp2()) when debugging?
@@ -786,23 +804,23 @@ public defn encode (fid:Int, func:VMFunction,
         dump(a, "YIELD\n") when debugging?
         val continue-label = new-label(a)
         ;Save current stack
-        mov(a, MemPtr(stk(), STACK-STACK-POINTER-OFFSET), stack-pointer())
+        stack-set(a, STACK-STACK-POINTER-OFFSET, stack-pointer())
         lea(a, tmp2(), MemPtr(continue-label, 0))
-        mov(a, MemPtr(stk(), STACK-PC-OFFSET), tmp2())
+        stack-set(a, STACK-PC-OFFSET, tmp2())
         ;Load next stack
         mov(a, current-stack(), LOCAL(tmp1(), value))
         untag-stack(a, stk(), current-stack())
-        mov(a, stack-pointer(), MemPtr(stk(), STACK-STACK-POINTER-OFFSET))
+        stack-get(a, STACK-STACK-POINTER-OFFSET, stack-pointer())
         dump(a, "YIELD STK %p\n" stk()) when debugging?
         ;Load starting address
-        mov(a, tmp1(), MemPtr(stk(), STACK-PC-OFFSET))
+        stack-get(a, STACK-PC-OFFSET, tmp1())
         dump(a, "SAVED PC %p\n", tmp1()) when debugging?
         ; mov(a, tmp2(), MemPtr(functions(), tmp1(), 3, 0))
         jmp(a, tmp1())
         bind(a, continue-label)
       RETURN-OPCODE : 
         plop("A RETURN")
-        mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET))
+        stack-frame-get(a, STACK-FRAME-RETURN-OFFSET, tmp1())
         dump(a, "RETURNING TO %p\n", tmp1()) when debugging?
         jmp(a, tmp1())
         ; int64_t retpc = stack_pointer->returnpc;
@@ -814,7 +832,7 @@ public defn encode (fid:Int, func:VMFunction,
         plop("A LIVE")
         mov(a, tmp2(), value)
         ; dump(a, "LIVE %p %p\n", stack-pointer(), tmp2())
-        mov(a, MemPtr(stack-pointer(), STACK-FRAME-LIVENESS-MAP-OFFSET), tmp2())
+        stack-frame-set(a, STACK-FRAME-LIVENESS-MAP-OFFSET, tmp2())
         ; stack_pointer->liveness_map = value;
       DISPATCH-METHOD-OPCODE :
         plop("A DISPATCH-METHOD")
@@ -1071,7 +1089,7 @@ public defn encode (fid:Int, func:VMFunction,
         val faddr = LOCAL(value)
         c-trampoline(a, faddr, registers(), registers())
         RESTORE-STATE()
-        mov(a, tmp1(), MemPtr(stack-pointer(), STACK-FRAME-RETURN-OFFSET))
+        stack-frame-get(a, STACK-FRAME-RETURN-OFFSET, tmp1())
         jmp(a, tmp1())
         POP-FRAME(num-locals)
         bind(a, end-label)
