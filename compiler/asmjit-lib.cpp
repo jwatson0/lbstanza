@@ -175,7 +175,10 @@ void assembler_mov_xmm_reg(Assembler *a, const Xmm *dst, const Gp *src) {
 void assembler_mov_reg_xmm(Assembler *a, const Gp *dst, const Xmm *src) {
   a->movd(*dst, *src);
 }
-void assembler_mov_const(Assembler *a, const Gp *reg, uint64_t value) {
+void assembler_mov_int(Assembler *a, const Gp *reg, uint32_t value) {
+  a->mov(*reg, uint32_t(value));
+}
+void assembler_mov_long(Assembler *a, const Gp *reg, uint64_t value) {
   a->mov(*reg, uint64_t(value));
 }
 void assembler_mov_label(Assembler *a, const Gp *reg, Label *value) {

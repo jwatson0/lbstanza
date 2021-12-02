@@ -17,7 +17,8 @@ extern assembler_pop: (ptr<?>, ptr<?>) -> int
 extern assembler_call_label: (ptr<?>, ptr<?>) -> int
 extern assembler_call_reg: (ptr<?>, ptr<?>) -> int
 extern assembler_ret: (ptr<?>) -> int
-extern assembler_mov_const: (ptr<?>, ptr<?>, long) -> int
+extern assembler_mov_int: (ptr<?>, ptr<?>, int) -> int
+extern assembler_mov_long: (ptr<?>, ptr<?>, long) -> int
 extern assembler_mov_label: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_movsx: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_movsxd: (ptr<?>, ptr<?>, ptr<?>) -> int
@@ -336,7 +337,10 @@ public lostanza defn ashr (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<Fa
   call-c assembler_ashr_reg(a.value, dst.value, src.value)
   return false
 public lostanza defn mov (a:ref<Assembler>, reg:ref<Gp>, value:ref<Long>) -> ref<False> :
-  call-c assembler_mov_const(a.value, reg.value, value.value)
+  call-c assembler_mov_long(a.value, reg.value, value.value)
+  return false
+public lostanza defn mov (a:ref<Assembler>, reg:ref<Gp>, value:ref<Int>) -> ref<False> :
+  call-c assembler_mov_int(a.value, reg.value, value.value)
   return false
 public lostanza defn mov (a:ref<Assembler>, reg:ref<Gp>, value:ref<Label>) -> ref<False> :
   call-c assembler_mov_label(a.value, reg.value, value.value)

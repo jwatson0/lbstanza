@@ -80,6 +80,7 @@ protected lostanza defn initialize-constants () -> ref<False> : return false
 lostanza defn extend-heap (size:long) -> long : return 0
 lostanza defn extend-stack (size:long) -> long : return 0
 lostanza defn print-stack-trace (stack:ref<Stack>) -> ref<False> : return false
+lostanza defn collect-stack-trace (stack:ref<Stack>) -> ref<False> : return false
 lostanza defn collect-garbage (size:long) -> long : return 0
 lostanza defn class-name (x:int) -> ptr<byte> : return ""
 public lostanza defn String (chars:ptr<byte>) -> ref<String> : return new String{1, 0}
@@ -940,6 +941,17 @@ lostanza defn report-errors () -> ref<False> :
 ;   if not r2 : error(16, 1, 0)
 ; 
 ; big-multi-methods-test()
+
+lostanza deftype Fudge :
+  var pool-index:int
+
+lostanza defn test-fudge () -> ref<False> :
+  val f = new Fudge{-1}
+  if f.pool-index != -1 :
+    call-c printf("BAD POOL INDEX %d\n", f.pool-index)
+  return false
+
+test-fudge()
 
 report-errors()
 
