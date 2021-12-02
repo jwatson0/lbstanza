@@ -168,9 +168,18 @@ public lostanza defn MemPtr (base-ptr:ref<Gp>, offset:ref<Int>, size:ref<Int>) -
   val p = call-c x86_ptr_gp_base_const_offset_size(base-ptr.value, offset.value, size.value)
   return new MemPtr{p}
 
+public defn MemPtr (base-ptr:Gp, offset:Int) -> MemPtr :
+  MemPtr(base-ptr, offset, 8)
+
 public lostanza defn MemPtr (base-ptr:ref<Gp>, index-ptr:ref<Gp>, shift:ref<Int>, offset:ref<Int>, size:ref<Int>) -> ref<MemPtr> :
   val p = call-c x86_ptr_gp_base_index_const_shift_offset_size(base-ptr.value, index-ptr.value, shift.value, offset.value, size.value)
   return new MemPtr{p}
+
+public defn MemPtr (base-ptr:Gp, index-ptr:Gp, shift:Int, offset:Int) -> MemPtr :
+  MemPtr(base-ptr, index-ptr, shift, offset, 0)
+
+public defn MemPtr (base-ptr:Gp, index-ptr:Gp, shift:Int) -> MemPtr :
+  MemPtr(base-ptr, index-ptr, shift, 0)
 
 public lostanza defn MemPtr (base-ptr:ref<Label>, index-ptr:ref<Gp>, shift:ref<Int>, offset:ref<Int>, size:ref<Int>) -> ref<MemPtr> :
   val p = call-c x86_ptr_label_base_index_const_shift_offset_size(base-ptr.value, index-ptr.value, shift.value, offset.value, size.value)
@@ -179,6 +188,12 @@ public lostanza defn MemPtr (base-ptr:ref<Label>, index-ptr:ref<Gp>, shift:ref<I
 public lostanza defn MemPtr (base-ptr:ref<Label>, index:ref<Int>, size:ref<Int>) -> ref<MemPtr> :
   val p = call-c x86_ptr_label_base_const_index_size(base-ptr.value, index.value, size.value)
   return new MemPtr{p}
+
+public defn MemPtr (base-ptr:Label, index:Int) -> MemPtr :
+  MemPtr(base-ptr, index, 8)
+
+public defn MemPtr (base-ptr:Label) -> MemPtr :
+  MemPtr(base-ptr, 0, 8)
 
 public lostanza defn al () -> ref<Gp> :
   return new Gp{ call-c x86_al() }
