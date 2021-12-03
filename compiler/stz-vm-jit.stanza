@@ -256,7 +256,6 @@ defn vmstate () :        r8()
 defn registers () :      r9()
 defn stack-pointer () :  r10()
 defn stk () :            r11()
-; defn current-stack () :  r12()
 defn functions () :      r12()
 defn tmp1 () :           r13()
 defn tmp2 () :           r14()
@@ -270,7 +269,7 @@ defn tmp3b () :          r15b()
 ; defn caller-saved-registers () : [r8(), r9(), r10(), r11(), rdx()] ;TODO: this is what the C calling convention says you have to save
 defn caller-saved-registers () : [vmstate(), registers(), functions(), stack-pointer(), stk(), tmp1(), tmp2(), tmp3()]
 defn etc-saved-registers () : [vmstate(), registers(), functions(), stack-pointer(), stk(), tmp1(), tmp2(), tmp3()]
-defn low-saved-registers () : [rbx(), rcx(), rsi(), rdi()] ; rdx()
+defn low-saved-registers () : [rbx(), rcx(), rsi(), rdi() rdx()]
 defn all-saved-registers () : cat(low-saved-registers(), caller-saved-registers())
 
 defn untag-stack (a:Assembler, dst:Gp, stk:Gp) -> Gp :
@@ -477,7 +476,7 @@ defn RESTORE-STATE (a:Assembler) :
   untag-stack(a, stk(), get-current-stack(a, tmp1()))
   get-stack-pointer(a, stack-pointer())
 
-public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func) -> Func : ;, continue:Label
+public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func) -> Func : 
   val end-label = tmp2()
   val size-required = tmp3()
   val code = code-holder-new(rt)
@@ -489,9 +488,9 @@ public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func)
   dump(a, "SAVING STK %p PC %p\n", stk(), end-label) 
   ;Swap stack and registers
   get-current-stack(a, tmp1())
-  set-current-stack(a, get-system-stack(a, rcx()))
+  set-current-stack(a, get-system-stack(a, rax()))
   set-system-stack(a, tmp1())
-  set-registers(a, get-system-registers(a, rcx()))
+  set-registers(a, get-system-registers(a, rax()))
   set-system-registers(a, registers())
   ;Restore stack state
   untag-stack(a, stk(), get-current-stack(a, tmp1()))
@@ -516,9 +515,9 @@ public defn make-extend-stack-return (rt:JitRuntime) -> Func :
   dump(a, "SWAP-STACK-AND-REGISTERS\n") ; when debugging?
   ;Swap stack and registers
   get-current-stack(a, tmp1())
-  set-current-stack(a, get-system-stack(a, rcx()))
+  set-current-stack(a, get-system-stack(a, rax()))
   set-system-stack(a, tmp1())
-  set-registers(a, get-system-registers(a, rcx()))
+  set-registers(a, get-system-registers(a, rax()))
   set-system-registers(a, registers())
   dump(a, "RESTORE-STACK-STATE\n") ; when debugging?
   ;Restore stack state
@@ -614,14 +613,14 @@ public defn encode (fid:Int, func:VMFunction,
     dst
   defn SET-REG (r:Int, v:Gp) :
     mov(a, MemPtr(registers(), r * SIZEOF-LONG), v)
-    dump(a, "SET-REG[%d] = %p\n", CONST(rbx(), r), v) when debugging?
-    dump(a, "  SET-REG[%d] = %p\n", CONST(rbx(), r), v) when tracing?
+    dump(a, "SET-REG[%d] = %p\n", CONST(rax(), r), v) when debugging?
+    dump(a, "  SET-REG[%d] = %p\n", CONST(rax(), r), v) when tracing?
   defn SET-REG-INT (r:Int, v:Gp) :
     movsxd(a, v, v)
     SET-REG(r, v)
   defn SET-LOCAL (l:Int, v:Gp) :
     mov(a, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET), v)
-    dump(a, "  SET-LOCAL[%d] = %p\n", CONST(rbx(), l), v) when debugging? 
+    dump(a, "  SET-LOCAL[%d] = %p\n", CONST(rax(), l), v) when debugging? 
     dump(a, "  SET-LOCAL[%d] = %p\n", CONST(rax(), l), v) when tracing? 
   defn SET-LOCAL-BYTE (l:Int, v:Gp) :
     and-op(a, v, 0xff)
@@ -631,7 +630,7 @@ public defn encode (fid:Int, func:VMFunction,
     SET-LOCAL(l, v)
   defn SET-LOCAL-FLOAT (l:Int,v:Xmm) :
     movsd(a, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET), v)
-    dump(a, "SET-LOCAL-FLOAT[%d] %p\n", CONST(rbx(), l), LOCAL(tmp1(), l)) when debugging? 
+    dump(a, "SET-LOCAL-FLOAT[%d] %p\n", CONST(rax(), l), LOCAL(tmp1(), l)) when debugging? 
   defn SET-LOCAL-DOUBLE (l:Int, v:Xmm) :
     movsd(a, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET), v)
     false
@@ -669,9 +668,9 @@ public defn encode (fid:Int, func:VMFunction,
     pop(a, r10())
     
   defn do-tcall (f:Gp) :
-    mov(a, tmp2(), MemPtr(functions(), f, 3, 0, SIZEOF-LONG))
-    dump(a, "CALLING %d %p\n", f, tmp2()) when debugging?
-    jmp(a, tmp2())
+    mov(a, tmp1(), MemPtr(functions(), f, 3, 0, SIZEOF-LONG))
+    dump(a, "CALLING %d %p\n", f, tmp1()) when debugging?
+    jmp(a, tmp1())
 
   defn do-call (f:Gp, num-locals:Int) :
     val end-label = new-label(a)
@@ -710,10 +709,7 @@ public defn encode (fid:Int, func:VMFunction,
         ;Size-required must be in tmp3 to line up for extend-stack-launch
         add(a, CONST(tmp3(), size-required), stack-pointer())
         val limit = stack-limit(tmp2())
-        dump(a, "STACK CHECK STK %p %p %p: ", stk(), tmp3(), limit) when debugging?
-        get-frames(a, rcx())
-        get-size(a, rax())
-        dump(a, "FRAMES %p SIZE %p\n", rcx(), rax()) when debugging?
+        dump(a, "STACK CHECK STK %p %p %p\n", stk(), tmp3(), limit) when debugging?
         cmp(a, tmp3(), limit)
         jle(a, all-good-label)
         CONST(tmp3(), size-required)
@@ -721,7 +717,7 @@ public defn encode (fid:Int, func:VMFunction,
         dump(a, "STACK-OVERFLOW %p RETURN-LABEL %p\n", tmp3(), tmp2()) ; when debugging?
         jmp(a, CONST(tmp1(), extend-stack-launch-value))
         bind(a, extend-return-label)
-        dump(a, "STACK GOOD TOP %p LIMIT %p\n", heap-top(rcx()), heap-limit(rcx())) ; when debugging?
+        dump(a, "STACK GOOD TOP %p LIMIT %p\n", heap-top(rax()), heap-limit(rax())) ; when debugging?
         bind(a, all-good-label)
       DISPATCH-OPCODE :
         plop("A DISPATCH")
@@ -736,9 +732,9 @@ public defn encode (fid:Int, func:VMFunction,
         plop("A TCALL-CLOSURE")
         dump(a, "TCALL-CLOSURE\n") when debugging?
         LOCAL(tmp1(), value)
-        mov(a, rbx(), MemPtr(tmp1(), FUNCTION-CODE-OFFSET + SIZEOF-LONG - REF-TAG-BITS))
-        dump(a, "TCODE %p\n", rbx()) when debugging?
-        do-tcall(rbx())
+        mov(a, rcx(), MemPtr(tmp1(), FUNCTION-CODE-OFFSET + SIZEOF-LONG - REF-TAG-BITS))
+        dump(a, "TCODE %p\n", rcx()) when debugging?
+        do-tcall(rcx())
       POP-FRAME-OPCODE :
         plop("A POP-FRAME")
         val num-locals = value
@@ -1020,25 +1016,24 @@ public defn encode (fid:Int, func:VMFunction,
       TCALL-OPCODE-LOCAL :
         plop("C TCALL-LOCAL")
         dump(a, "TCALL-LOCAL: ") when debugging?
-        do-tcall(LOCAL(rbx(), value))
+        do-tcall(LOCAL(tmp2(), value))
       TCALL-OPCODE-CODE :
         plop("C TCALL-CODE")
         dump(a, "TCALL-LOCAL: ") when debugging?
-        do-tcall(CONST(rbx(), value))
+        do-tcall(CONST(tmp2(), value))
       CALL-OPCODE-LOCAL :
         plop("C CALL-LOCAL %_" % [value])
         dump(a, "CALL-LOCAL\n") when debugging?
-        do-call(LOCAL(rbx(), value), x)
+        do-call(LOCAL(tmp2(), value), x)
       CALL-OPCODE-CODE :
         plop("C CALL-CODE %_" % [value])
         dump(a, "CALL-CODE\n") when debugging?
-        do-call(CONST(rbx(), value), x)
+        do-call(CONST(tmp2(), value), x)
       CALL-CLOSURE-OPCODE :
         plop("C CALL-CLOSURE")
-        LOCAL(tmp1(), value)
-        mov(a, rdx(), MemPtr(tmp1(), FUNCTION-CODE-OFFSET + SIZEOF-LONG - REF-TAG-BITS))
-        dump(a, "CALL-CLOSURE %p %p\n", tmp1(), rdx()) when debugging?
-        do-call(rdx(), x)
+        mov(a, tmp2(), MemPtr(LOCAL(tmp1(), value), FUNCTION-CODE-OFFSET + SIZEOF-LONG - REF-TAG-BITS))
+        dump(a, "CALL-CLOSURE %p %p\n", tmp1(), tmp2()) when debugging?
+        do-call(tmp2(), x)
       CALLC-OPCODE-LOCAL :
         plop("C CALLC-LOCAL")
         val end-label = new-label(a)
@@ -1071,19 +1066,19 @@ public defn encode (fid:Int, func:VMFunction,
         SET-REG(x, CONST(tmp1(), value))
       SET-REG-OPCODE-GLOBAL :
         plop("C SET-REG-GLOBAL")
-        mov(a, rbx(), MemPtr(global-offsets(rcx()), CONST(tmp1(), value), 3, 0))
-        lea(a, tmp1(), MemPtr(global-mem(rcx()), rbx(), 0, 0))
+        mov(a, tmp2(), MemPtr(global-offsets(rax()), CONST(tmp1(), value), 3, 0))
+        lea(a, tmp1(), MemPtr(global-mem(rax()), tmp2(), 0, 0))
         SET-REG(x, tmp1())
       SET-REG-OPCODE-DATA :
         plop("C SET-REG-DATA x=%_ value=%_" % [x, value])
-        mov(a, tmp2i(), MemPtr(data-offsets(rcx()), CONST(tmp1(), value), 2, 0, SIZEOF-INT))
-        lea(a, tmp1(), MemPtr(data-mem(rcx()), tmp2i(), 3, 0))
+        mov(a, tmp2i(), MemPtr(data-offsets(rax()), CONST(tmp1(), value), 2, 0, SIZEOF-INT))
+        lea(a, tmp1(), MemPtr(data-mem(rax()), tmp2i(), 3, 0))
         SET-REG(x, tmp1())
         dump(a, "SET-REG-DATA %x %p\n" CONST(tmp2(), x) tmp1()) when debugging?
       SET-REG-OPCODE-CONST :
         plop("C SET-REG-CONST X %_ VALUE %_" % [x, value])
         dump(a, "SET-REG-CONST %d\n", CONST(tmp3(), value)) when debugging?
-        mov(a, tmp1(), MemPtr(const-table(rcx()), CONST(tmp3(), value), 3, 0))
+        mov(a, tmp1(), MemPtr(const-table(rax()), CONST(tmp3(), value), 3, 0))
         SET-REG(x, tmp1())
       SET-REG-OPCODE-UNSIGNED :
         plop("C SET-REG-UNSIGNED")
@@ -1105,17 +1100,17 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, CONST(tmp1(), value))
       SET-OPCODE-GLOBAL :
         plop("C SET-GLOBAL")
-        mov(a, rbx(), MemPtr(global-offsets(rcx()), CONST(tmp1(), value), 3, 0))
-        lea(a, tmp1(), MemPtr(global-mem(rcx()), rbx(), 0, 0))
+        mov(a, tmp2(), MemPtr(global-offsets(rax()), CONST(tmp1(), value), 3, 0))
+        lea(a, tmp1(), MemPtr(global-mem(rax()), tmp2(), 0, 0))
         SET-LOCAL(x, tmp1())
       SET-OPCODE-DATA :
         plop("C SET-DATA")
-        mov(a, tmp2i(), MemPtr(data-offsets(rcx()), CONST(tmp1(), value), 2, 0, SIZEOF-INT))
-        lea(a, tmp1(), MemPtr(data-mem(rcx()), tmp2i(), 3, 0))
+        mov(a, tmp2i(), MemPtr(data-offsets(rax()), CONST(tmp1(), value), 2, 0, SIZEOF-INT))
+        lea(a, tmp1(), MemPtr(data-mem(rax()), tmp2i(), 3, 0))
         SET-LOCAL(x, tmp1())
       SET-OPCODE-CONST :
         plop("C SET-CONST")
-        mov(a, tmp2(), MemPtr(const-table(rcx()), CONST(tmp1(), value), 3, 0))
+        mov(a, tmp2(), MemPtr(const-table(rax()), CONST(tmp1(), value), 3, 0))
         dump(a, "SET-CONST %d %p\n", CONST(tmp1(), value), tmp2()) when debugging?
         SET-LOCAL(x, tmp2())
       else :
@@ -1124,11 +1119,10 @@ public defn encode (fid:Int, func:VMFunction,
   defn emit-ins-c (opcode:Int, x:Label, y:Int, value:Int) :
     trace-opcode(opcode)
     defn do-reserve (size:Gp, num-locals:Int) :
-      mov(a, tmp2(), heap-top(rcx()))
-      add(a, tmp2(), size)
+      add(a, heap-top(tmp2()), size)
       dump(a, "RESERVE SIZE %d TOP %p " size, heap-top(rcx())) when debugging?
       dump(a, "DESIRED %p LIMIT %p\n" tmp2(), heap-limit(rcx())) when debugging?
-      cmp(a, tmp2(), heap-limit(rcx()))
+      cmp(a, tmp2(), heap-limit(rax()))
       jle(a, x)
       dump(a, "EXTENDING HEAP %d\n" size) when debugging?
       dump(a, "EXTENDING HEAP\n") when tracing?
@@ -1184,7 +1178,7 @@ public defn encode (fid:Int, func:VMFunction,
     trace-opcode(opcode)
     defn do-alloc (type:Int, num-bytes:Gp) :
       val top = tmp2()
-      mov(a, top, heap-top(rcx()))
+      heap-top(top)
       dump(a, "--> ALLOC %p %d\n", top, num-bytes, rax()) when (debugging? or tracing?)
       mov(a, MemPtr(top, 0), CONST(tmp1(), value))
       dump(a, "TYPE = %p\n", tmp1()) when debugging?
@@ -1240,7 +1234,7 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL(x, tmp1())
       INT-SHL-OPCODE :
         plop("C INT-SHL X %_ Y %_ VALUE %_" % [x, y, value])
-        shr(a, LOCAL(rcx(), value), 32)
+        shr(a, LOCAL(rcx(), value), 32) 
         shl(a, LOCAL(tmp1(), y), rcx())
         SET-LOCAL(x, tmp1())
         dump(a, "INT-SHL %p << %d\n" tmp1(), rcx()) when debugging?
@@ -1790,12 +1784,12 @@ public defn encode (fid:Int, func:VMFunction,
       JUMP-TAGWORD-OPCODE :
         plop("F JUMP-TAGWORD")
         LOCAL(tmp1(), x) ; OBJ
-        and-op(a, LOCAL(tmp2(), x), CONST(rbx(), 7)) ; TAGBITS
-        LOCAL(rbx(), y) ; TAG
+        and-op(a, LOCAL(tmp2(), x), CONST(tmp3(), 7)) ; TAGBITS
+        LOCAL(tmp3(), y) ; TAG
         cmp(a, tmp2(), CONST(rax(), 1)) ; tagbits == 1
         jne(a, n2)
         mov(a, tmp1(), MemPtr(tmp1(), -1, SIZEOF-INT)) ; *p = *((int*)(obj - 1))
-        jump-op-reg(tmp1(), rbx(), je, cmp, n1, n2)    ; *p == tag
+        jump-op-reg(tmp1(), tmp3(), je, cmp, n1, n2)    ; *p == tag
       JUMP-SET-OPCODE :
         plop("F JUMP-SET")
         dump(a, "JUMP-SET[%lld] %p\n" CONST(tmp2(), x), LOCAL(tmp1(), x)) when debugging?
