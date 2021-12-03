@@ -376,14 +376,13 @@ lostanza defn dump-memory-64-addr () -> ref<Long> :
   return new Long{addr!(dump_memory_64) as long}
 
 lostanza defn dump-memory-x (a:ref<Assembler>, faddr:ref<Long>, start:ref<Gp>, n:ref<Long>) -> ref<False> :
-  if debugging? == true :
-    caller-save-registers(a)
-    mov(a, rdi(), start)
-    mov(a, rsi(), n)
-    mov(a, rax(), new Long{0L})
-    mov(a, tmp1(), faddr)
-    call(a, tmp1())
-    caller-restore-registers(a)
+  caller-save-registers(a)
+  mov(a, rdi(), start)
+  mov(a, rsi(), n)
+  mov(a, rax(), new Long{0L})
+  mov(a, tmp1(), faddr)
+  call(a, tmp1())
+  caller-restore-registers(a)
   return false
 
 lostanza defn dump-memory-8 (a:ref<Assembler>, start:ref<Gp>, n:ref<Long>) -> ref<False> :
@@ -402,43 +401,49 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
   ; mov(a, rax(), 0L)
   ; mov(a, rax(), MemPtr(rax(), 0, 0))
   ; Setup JIT registers
+  val out? = debugging? ; or tracing?
   mov(a, tmp1(), c-params()[0])
   push(a, tmp1()) ;PUSHING RSP
-  dump(a, "JIT CRSP TMP1 %p SP %p\n" tmp1(), rsp()) when debugging?
+  dump(a, "JIT CRSP TMP1 %p SP %p\n" tmp1(), rsp()) when out?
   mov(a, tmp1(), MemPtr(rsp(), 0))
-  dump(a, "JIT CRSP SP[0] %p\n" tmp1()) when debugging?
+  dump(a, "JIT CRSP SP[0] %p\n" tmp1()) when out?
   mov(a, vmstate(), vms)
-  dump(a, "JIT VMSTATE %p\n" vmstate()) when (debugging? or tracing?)
+  dump(a, "JIT VMSTATE %p\n" vmstate()) when out?
   get-registers(a, registers())
   get-functions(a, functions())
   get-current-stack(a, current-stack())
-  dump(a, "JIT CURRENT-STACK %p\n" current-stack()) when debugging?
+  dump(a, "JIT CURRENT-STACK %p\n" current-stack()) when out?
   untag-stack(a, stk(), current-stack())
-  dump(a, "JIT STK %p\n" stk()) when debugging?
+  dump(a, "JIT STK %p\n" stk()) when out?
   ; dump-memory-64(a, stk(), 4L)
-  plop("STACK-STACK-POINTER-OFFSET %_" % [STACK-STACK-POINTER-OFFSET])
-  stack-get(a, STACK-STACK-POINTER-OFFSET, stack-pointer())
-  dump(a, "JIT STACK-POINTER %p\n" stack-pointer()) when debugging?
-  dump(a, "REGISTERS:\n") when debugging?
-  dump-memory-64(a, vmstate-get(a, VMSTATE-REGISTERS-OFFSET), 4L)
-  dump(a, "CONST-TABLE:\n") when debugging?
-  dump-memory-64(a, vmstate-get(a, VMSTATE-CONST-TABLE-OFFSET), 16L)
+  get-stack-pointer(a, stack-pointer())
+  dump(a, "JIT STACK-POINTER %p\n" stack-pointer()) when out?
+  dump(a, "REGISTERS:\n") when out?
+  dump-memory-64(a, get-registers(a, rcx()), 4L) when out?
+  dump(a, "CONST-TABLE:\n") when out?
+  dump-memory-64(a, get-const-table(a, rcx()), 16L) when out?
 
   val ret-label = new-label(a)
   lea(a, tmp2(), MemPtr(ret-label))
-  dump(a, "RET-LABEL %p\n" tmp2()) when debugging?
+  dump(a, "RET-LABEL %p\n" tmp2()) when out?
   set-return(a, tmp2())
-  ; mov(a, MemPtr(vmstate(), VMSTATE-INSTRUCTIONS-OFFSET), CONST(a, tmp1(), 0))
+  ; set-instructions(a, CONST(a, tmp1(), 0))
   ; call init
   plop("INIT-ID %_" % [init-id])
+  dump(a, "INIT-ID %d" CONST(a, tmp1(), init-id)) when out?
   get-heap-top(a, tmp1())
-  dump(a, "%p\n", tmp1()) when tracing?
+  dump(a, "%p\n", tmp1()) when (out? or tracing?)
   get-global-mem(a, tmp1())
-  dump(a, ">>> %p\n", tmp1()) when tracing?
-  mov(a, rax(), MemPtr(functions(), init-id * SIZEOF-LONG))
-  jmp(a, rax())
+  dump(a, ">>> %p\n", tmp1()) when (out? or tracing?)
+  mov(a, tmp1(), MemPtr(functions(), init-id * SIZEOF-LONG))
+  dump(a, "JMP %p\n", tmp1()) when (out? or tracing?)
+  jmp(a, tmp1())
   bind(a, ret-label)
-  dump(a, "RET-LABEL\n") when debugging?
+  dump(a, "RET-LABEL\n") when out?
+  dump(a, "JIT STACK-POINTER %p\n" stack-pointer()) when out?
+  set-current-stack(a, current-stack())
+  set-stack-pointer(a, stack-pointer())
+  ; SAVE-STATE-ONLY(a)
   pop(a, tmp1()) ;POPPING CRSP
   ret(a)
   add(rt, code)
