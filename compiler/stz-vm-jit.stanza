@@ -610,16 +610,10 @@ public defn encode (fid:Int, func:VMFunction,
     dump(a, "  SET-LOCAL[%d] = %p\n", CONST(rbx(), l), v) when debugging? 
     dump(a, "  SET-LOCAL[%d] = %p\n", CONST(rax(), l), v) when tracing? 
   defn SET-LOCAL-BYTE (l:Int, v:Gp) :
-    ;TODO: COULD MERGE ABOVE WITH THIS
     and-op(a, v, 0xff)
     SET-LOCAL(l, v)
   defn SET-LOCAL-INT (l:Int, v:Gp) :
-    ;TODO: COULD MERGE ABOVE WITH THIS
     movsxd(a, v, v)
-    SET-LOCAL(l, v)
-  defn SET-LOCAL-INT-EXT (l:Int, v:Gp) :
-    ;TODO: COULD MERGE ABOVE WITH THIS
-    movsx(a, v, v)
     SET-LOCAL(l, v)
   defn SET-LOCAL-FLOAT (l:Int,v:Xmm) :
     movsd(a, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET), v)
@@ -632,7 +626,6 @@ public defn encode (fid:Int, func:VMFunction,
     mov(a, dst, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET)) 
     dst
   defn LOCAL (l:Int) -> Gp : LOCAL(tmp2(), l)
-   ; stack_pointer->slots[l]
   defn LOCAL-FLOAT (dst:Xmm, l:Int) -> Xmm :
     movss(a, dst, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET, SIZEOF-INT))
     dst
@@ -642,7 +635,6 @@ public defn encode (fid:Int, func:VMFunction,
     movsd(a, dst, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET))
     dst
   defn LOCAL-DOUBLE (l:Int) -> Xmm :
-    ; TODO: double register
     LOCAL-DOUBLE(xmm0(), l)
 
   defn PUSH-FRAME (num-locals:Int, ret-addr:Label) :
@@ -661,7 +653,6 @@ public defn encode (fid:Int, func:VMFunction,
   defn SAVE-STATE () :
     SAVE-STATE-ONLY()
     etc-save-registers(a)
-    false
 
   defn RESTORE-STATE () :
     etc-restore-registers(a)
@@ -728,7 +719,6 @@ public defn encode (fid:Int, func:VMFunction,
         CONST(tmp3(), size-required)
         lea(a, tmp2(), MemPtr(extend-return-label, 0))
         dump(a, "STACK-OVERFLOW %p RETURN-LABEL %p\n", tmp3(), tmp2()) ; when debugging?
-        ; PUSH-FRAME(0, extend-return-label)
         jmp(a, CONST(tmp1(), extend-stack-launch-value))
         bind(a, extend-return-label)
         dump(a, "STACK GOOD TOP %p LIMIT %p\n", heap-top(rcx()), heap-limit(rcx())) ; when debugging?
@@ -920,8 +910,7 @@ public defn encode (fid:Int, func:VMFunction,
         SET-LOCAL-INT(x, tmp1())
       CONV-OPCODE-LONG-BYTE : ;YYY
         plop("B CONV-LONG-BYTE")
-        and-op(a, LOCAL(tmp1(), value), 0xff)
-        SET-LOCAL(x, tmp1())
+        SET-LOCAL-BYTE(x, tmp1())
         dump(a, "CONV-LONG-BYTE %p %p\n", tmp1(), LOCAL(tmp2(), x)) when debugging?
       CONV-OPCODE-LONG-INT : ;YYY
         plop("B CONV-LONG-INT X %_ VALUE %_" % [x, value])
@@ -1542,7 +1531,7 @@ public defn encode (fid:Int, func:VMFunction,
         plop("C ASHR-INT")
         ashr(a, LOCAL(tmp1(), y), LOCAL(rcx(), value))
         dump(a, "ASHR-INT %p\n" tmp1i()) when debugging?
-        SET-LOCAL-INT-EXT(x, tmp1())
+        SET-LOCAL-INT(x, tmp1())
       ASHR-OPCODE-LONG : ;YYY
         plop("C ASHR-LONG")
         ashr(a, LOCAL(tmp1(), y), LOCAL(rcx(), value))
