@@ -256,17 +256,17 @@ defn vmstate () :        r8()
 defn registers () :      r9()
 defn stack-pointer () :  r10()
 defn stk () :            r11()
-defn current-stack () :  r12()
-defn functions () :      r13()
-defn tmp1 () :           r14()
-defn tmp2 () :           r15()
-defn tmp1i () :          r14d()
-defn tmp2i () :          r15d()
-defn tmp1b () :          r14b()
-defn tmp2b () :          r15b()
-defn tmp3 () :           rdx()
-defn tmp3i () :          edx()
-defn tmp3b () :          dl()
+; defn current-stack () :  r12()
+defn functions () :      r12()
+defn tmp1 () :           r13()
+defn tmp2 () :           r14()
+defn tmp1i () :          r13d()
+defn tmp2i () :          r14d()
+defn tmp1b () :          r13b()
+defn tmp2b () :          r14b()
+defn tmp3 () :           r15()
+defn tmp3i () :          r15d()
+defn tmp3b () :          r15b()
 ; defn caller-saved-registers () : [r8(), r9(), r10(), r11(), rdx()] ;TODO: this is what the C calling convention says you have to save
 defn caller-saved-registers () : [vmstate(), registers(), functions(), stack-pointer(), stk(), tmp1(), tmp2(), tmp3()]
 defn etc-saved-registers () : [vmstate(), registers(), functions(), stack-pointer(), stk(), tmp1(), tmp2(), tmp3()]
@@ -411,9 +411,7 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
   dump(a, "JIT VMSTATE %p\n" vmstate()) when out?
   get-registers(a, registers())
   get-functions(a, functions())
-  get-current-stack(a, current-stack())
-  dump(a, "JIT CURRENT-STACK %p\n" current-stack()) when out?
-  untag-stack(a, stk(), current-stack())
+  untag-stack(a, stk(), get-current-stack(a, tmp1()))
   dump(a, "JIT STK %p\n" stk()) when out?
   ; dump-memory-64(a, stk(), 4L)
   get-stack-pointer(a, stack-pointer())
@@ -441,9 +439,7 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
   bind(a, ret-label)
   dump(a, "RET-LABEL\n") when out?
   dump(a, "JIT STACK-POINTER %p\n" stack-pointer()) when out?
-  set-current-stack(a, current-stack())
-  set-stack-pointer(a, stack-pointer())
-  ; SAVE-STATE-ONLY(a)
+  SAVE-STATE-ONLY(a)
   pop(a, tmp1()) ;POPPING CRSP
   ret(a)
   add(rt, code)
@@ -465,10 +461,21 @@ defn dump-state (a:Assembler, msg:String) :
     dump(a, msg)
     dump-memory-64(a, vmstate(), 17L)
     dump(a, "REGISTERS:     %p\n", registers())
-    dump(a, "CURRENT-STACK: %p\n", current-stack())
     dump(a, "STK:           %p\n", stk())
     dump(a, "STACK-POINTER: %p\n", stack-pointer())
     dump-memory-64(a, stack-pointer(), 6L)
+
+defn SAVE-STATE-ONLY (a:Assembler) :
+  set-stack-pointer(a, stack-pointer())
+
+defn SAVE-STATE (a:Assembler) :
+  SAVE-STATE-ONLY(a)
+  etc-save-registers(a)
+
+defn RESTORE-STATE (a:Assembler) :
+  etc-restore-registers(a)
+  untag-stack(a, stk(), get-current-stack(a, tmp1()))
+  get-stack-pointer(a, stack-pointer())
 
 public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func) -> Func : ;, continue:Label
   val end-label = tmp2()
@@ -481,13 +488,13 @@ public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func)
   set-pc(a, end-label)
   dump(a, "SAVING STK %p PC %p\n", stk(), end-label) 
   ;Swap stack and registers
+  get-current-stack(a, tmp1())
   set-current-stack(a, get-system-stack(a, rcx()))
-  set-system-stack(a, current-stack())
+  set-system-stack(a, tmp1())
   set-registers(a, get-system-registers(a, rcx()))
   set-system-registers(a, registers())
   ;Restore stack state
-  get-current-stack(a, current-stack())
-  untag-stack(a, stk(), current-stack())
+  untag-stack(a, stk(), get-current-stack(a, tmp1()))
   get-stack-pointer(a, stack-pointer())
   get-registers(a, registers())
   ;Set arguments
@@ -508,14 +515,14 @@ public defn make-extend-stack-return (rt:JitRuntime) -> Func :
   set-stack-pointer(a, CONST(a, tmp1(), 0))
   dump(a, "SWAP-STACK-AND-REGISTERS\n") ; when debugging?
   ;Swap stack and registers
+  get-current-stack(a, tmp1())
   set-current-stack(a, get-system-stack(a, rcx()))
-  set-system-stack(a, current-stack())
+  set-system-stack(a, tmp1())
   set-registers(a, get-system-registers(a, rcx()))
   set-system-registers(a, registers())
   dump(a, "RESTORE-STACK-STATE\n") ; when debugging?
   ;Restore stack state
-  get-current-stack(a, current-stack())
-  untag-stack(a, stk(), current-stack())
+  untag-stack(a, stk(), get-current-stack(a, tmp1()))
   get-stack-pointer(a, stack-pointer())
   get-registers(a, registers())
   ;Continue where we were
@@ -653,20 +660,6 @@ public defn encode (fid:Int, func:VMFunction,
   defn POP-FRAME (num-locals:Int) :
     add(a, stack-pointer(), -1 * (SIZEOF-STACK-FRAME + num-locals * SIZEOF-LONG))
 
-  defn SAVE-STATE-ONLY () :
-    set-current-stack(a, current-stack())
-    set-stack-pointer(a, stack-pointer())
-
-  defn SAVE-STATE () :
-    SAVE-STATE-ONLY()
-    etc-save-registers(a)
-
-  defn RESTORE-STATE () :
-    etc-restore-registers(a)
-    get-current-stack(a, current-stack())
-    untag-stack(a, stk(), current-stack())
-    get-stack-pointer(a, stack-pointer())
-
   defn c-call (fptr:Long) :
     push(a, r10())
     push(a, r11())
@@ -760,9 +753,9 @@ public defn encode (fid:Int, func:VMFunction,
         set-pc(a, tmp1())
         dump(a, "SET STK-PC %p\n" tmp1()) when debugging?
         ;Load next stack
-        mov(a, current-stack(), LOCAL(tmp1(), value))
+        set-current-stack(a, LOCAL(tmp1(), value))
         dump(a, "ENTER STACK %p\n" tmp1()) when debugging?
-        untag-stack(a, stk(), current-stack())
+        untag-stack(a, stk(), tmp1())
         dump(a, "ENTER STK %p\n" stk()) when debugging?
         get-frames(a, stack-pointer())
         ;Load starting address
@@ -781,8 +774,8 @@ public defn encode (fid:Int, func:VMFunction,
         lea(a, tmp2(), MemPtr(continue-label, 0))
         set-pc(a, tmp2())
         ;Load next stack
-        mov(a, current-stack(), LOCAL(tmp1(), value))
-        untag-stack(a, stk(), current-stack())
+        set-current-stack(a, LOCAL(tmp1(), value))
+        untag-stack(a, stk(), tmp1())
         get-stack-pointer(a, stack-pointer())
         dump(a, "YIELD STK %p\n" stk()) when debugging?
         ;Load starting address
@@ -820,7 +813,7 @@ public defn encode (fid:Int, func:VMFunction,
         bind(a, tgts)
       FLUSH-VM-OPCODE :
         plop("A FLUSH-VM")
-        SAVE-STATE-ONLY()
+        SAVE-STATE-ONLY(a)
         dump(a, "FLUSH-VM\n") when debugging?
         SET-LOCAL(value, vmstate())
       C-RSP-OPCODE :
@@ -1000,9 +993,9 @@ public defn encode (fid:Int, func:VMFunction,
         plop("B GC")
         dump(a, "START GC TOP %p LIMIT %p\n", heap-top(tmp1()), heap-limit(tmp2())) when debugging?
         LOCAL(tmp1(), value)
-        SAVE-STATE()
+        SAVE-STATE(a)
         call-garbage-collector(a, vmstate(), tmp1())
-        RESTORE-STATE()
+        RESTORE-STATE(a)
         SET-LOCAL(x, rax())
         dump(a, "DONE GC TOP %p LIMIT %p\n", heap-top(tmp1()), heap-limit(tmp2())) when debugging?
       CLASS-NAME-OPCODE :
@@ -1051,10 +1044,10 @@ public defn encode (fid:Int, func:VMFunction,
         val end-label = new-label(a)
         val num-locals = x
         PUSH-FRAME(num-locals, end-label)
-        SAVE-STATE()
+        SAVE-STATE(a)
         val faddr = LOCAL(value)
         c-trampoline(a, faddr, registers(), registers())
-        RESTORE-STATE()
+        RESTORE-STATE(a)
         get-return(a, tmp1())
         jmp(a, tmp1())
         POP-FRAME(num-locals)
@@ -1688,11 +1681,11 @@ public defn encode (fid:Int, func:VMFunction,
         val faddr = value
         val num_locals = x
         PUSH-FRAME(num_locals, end-label)
-        SAVE-STATE()
+        SAVE-STATE(a)
         mov(a, tmp1(), faddr)
         dump(a, "CALLC-WIDE %p\n" tmp1()) when debugging?
         c-trampoline(a, tmp1(), registers(), registers())
-        RESTORE-STATE()
+        RESTORE-STATE(a)
         POP-FRAME(num_locals)
         bind(a, end-label)
       SET-OPCODE-WIDE :

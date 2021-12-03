@@ -396,11 +396,17 @@ const Gp* x86_r14(void) {
 const Gp* x86_r15(void) {
   return &r15;
 }
+const Gp* x86_r13d(void) {
+  return &r13d;
+}
 const Gp* x86_r14d(void) {
   return &r14d;
 }
 const Gp* x86_r15d(void) {
   return &r15d;
+}
+const Gp* x86_r13b(void) {
+  return &r13b;
 }
 const Gp* x86_r14b(void) {
   return &r14b;
