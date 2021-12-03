@@ -384,6 +384,9 @@ const Gp* x86_rsp(void) {
 const Gp* x86_rbp(void) {
   return &rbp;
 }
+const Rip* x86_rip(void) {
+  return &rip;
+}
 const Gp* x86_r8(void) {
   return &r8;
 }

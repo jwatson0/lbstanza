@@ -133,6 +133,7 @@ extern x86_rsi: () -> ptr<?>
 extern x86_rdi: () -> ptr<?>
 extern x86_rsp: () -> ptr<?>
 extern x86_rbp: () -> ptr<?>
+extern x86_rip: () -> ptr<?>
 extern x86_r8: () -> ptr<?>
 extern x86_r9: () -> ptr<?>
 extern x86_r10: () -> ptr<?>
@@ -159,6 +160,8 @@ public lostanza deftype Assembler :
 public lostanza deftype Label :
   value: ptr<?>
 public lostanza deftype Gp :
+  value: ptr<?>
+public lostanza deftype Rip :
   value: ptr<?>
 public lostanza deftype Xmm :
   value: ptr<?>
@@ -241,6 +244,8 @@ public lostanza defn rsp () -> ref<Gp> :
   return new Gp{ call-c x86_rsp() }
 public lostanza defn rbp () -> ref<Gp> :
   return new Gp{ call-c x86_rbp() }
+public lostanza defn rip () -> ref<Rip> :
+  return new Rip{ call-c x86_rip() }
 public lostanza defn r8 () -> ref<Gp> :
   return new Gp{ call-c x86_r8() }
 public lostanza defn r9 () -> ref<Gp> :

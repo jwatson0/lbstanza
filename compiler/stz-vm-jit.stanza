@@ -466,13 +466,21 @@ defn dump-stack-frame (a:Assembler, sp:Gp) :
   dump-memory-64(a, sp, 3L) when debugging?
 
 defn dump-state (a:Assembler, msg:String) :
-  if debugging? :
-    dump(a, msg)
-    dump-memory-64(a, vmstate(), 17L)
-    dump(a, "REGISTERS:     %p\n", registers())
-    dump(a, "STK:           %p\n", stk())
-    dump(a, "STACK-POINTER: %p\n", stack-pointer())
-    dump-memory-64(a, stack-pointer(), 6L)
+  dump(a, msg)
+  dump-memory-64(a, vmstate(), 16L)
+  dump(a, "REGISTERS:     %p\n", registers())
+  dump(a, "STK:           %p\n", stk())
+  dump(a, "STACK-POINTER: %p\n", stack-pointer())
+  ; dump-memory-64(a, stack-pointer(), 6L)
+
+defn dump-stack-state (a:Assembler, msg:String) :
+  dump(a, msg)
+  dump(a, "CURRENT-STACK: %p\n", get-current-stack(a, rax()))
+  dump(a, "SYSTEM-STACK:  %p\n", get-system-stack(a, rax()))
+  dump(a, "STK:           %p\n", stk())
+  dump(a, "STACK-POINTER: %p\n", stack-pointer())
+  dump(a, "STACK-LIMIT:   %p\n", compute-stack-limit(a, rax()))
+  ; dump-memory-64(a, stack-pointer(), 6L)
 
 defn SAVE-STATE-ONLY (a:Assembler) :
   set-stack-pointer(a, stack-pointer())
@@ -491,11 +499,12 @@ public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func)
   val size-required = tmp3()
   val code = code-holder-new(rt)
   val a = assembler-new(code)
-  dump(a, "EXTEND-STACK %p LABEL %p\n", size-required, end-label) 
+  dump(a, "EXTEND-STACK %p LABEL %p\n", size-required, end-label) when debugging?
+  dump-stack-state(a, "BEFORE\n") when debugging?
   ;Save current stack
   set-stack-pointer(a, stack-pointer())
   set-pc(a, end-label)
-  dump(a, "SAVING STK %p PC %p\n", stk(), end-label) 
+  dump(a, "SAVING STK %p PC %p\n", stk(), end-label) when debugging?
   ;Swap stack and registers
   get-current-stack(a, tmp1())
   set-current-stack(a, get-system-stack(a, rax()))
@@ -506,10 +515,11 @@ public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func)
   untag-stack(a, stk(), get-current-stack(a, tmp1()))
   get-stack-pointer(a, stack-pointer())
   get-registers(a, registers())
+  dump-stack-state(a, "AFTER\n") when debugging?
   ;Set arguments
   SET-REG(a, 0, do-BOOLREF(a, CONST(a, tmp1(), 0)))
   SET-REG(a, 1, CONST(a, tmp1(), 1))
-  SET-REG(a, 1, size-required)
+  SET-REG(a, 2, size-required)
   get-frames(a, stack-pointer())
   set-return(a, CONST(a, tmp1(), value(stack-overflow-return)))
   mov(a, tmp2(), MemPtr(functions(), SIZEOF-LONG * EXTEND-STACK-FN))
@@ -520,30 +530,32 @@ public defn make-extend-stack-return (rt:JitRuntime) -> Func :
   val code = code-holder-new(rt)
   val a = assembler-new(code)
   ;System stack no longer needed
-  dump(a, "EXTEND-STACK-RETURN\n") ; when debugging?
+  dump(a, "EXTEND-STACK-RETURN\n") when debugging?
   set-stack-pointer(a, CONST(a, tmp1(), 0))
-  dump(a, "SWAP-STACK-AND-REGISTERS\n") ; when debugging?
+  dump(a, "SWAP-STACK-AND-REGISTERS\n") when debugging?
   ;Swap stack and registers
+  dump(a, "RESTORE-STACK-STATE\n") when debugging?
+  dump-stack-state(a, "BEFORE\n") when debugging?
   get-current-stack(a, tmp1())
   set-current-stack(a, get-system-stack(a, rax()))
   set-system-stack(a, tmp1())
   set-registers(a, get-system-registers(a, rax()))
   set-system-registers(a, registers())
-  dump(a, "RESTORE-STACK-STATE\n") ; when debugging?
   ;Restore stack state
   untag-stack(a, stk(), get-current-stack(a, tmp1()))
   get-stack-pointer(a, stack-pointer())
   get-registers(a, registers())
+  dump-stack-state(a, "AFTER\n") when debugging?
   ;Continue where we were
-  get-pc(a, tmp1())
-  dump(a, "CONTINUE WHERE WE LEFT OFF STK %p PC %p\n", stk(), tmp1()) ; when debugging?
-  jmp(a, tmp1())
+  get-pc(a, tmp2())
+  dump(a, "CONTINUE WHERE WE LEFT OFF STK %p PC %p\n", stk(), tmp2()) when debugging?
+  jmp(a, tmp2())
   add(rt, code)
 
 defn compute-stack-limit (a:Assembler, dst:Gp) -> Gp :
   get-frames(a, dst)
   get-size(a, tmp1())
-  add(a, dst,    tmp1())
+  add(a, dst, tmp1())
   dst
 
 val covered = IntSet()
@@ -669,7 +681,7 @@ public defn encode (fid:Int, func:VMFunction,
     add(a, stack-pointer(), SIZEOF-STACK-FRAME + num-locals * SIZEOF-LONG)
     lea(a, tmp1(), MemPtr(ret-addr, 0))
     set-return(a, tmp1())
-    dump(a, "PUSH-FRAME %p RET %p\n" stack-pointer(), tmp1()) when debugging?
+    dump(a, "PUSH-FRAME NL %d %p RET %p\n" CONST(rax(), num-locals), stack-pointer(), tmp1()) when debugging?
 
   defn POP-FRAME (num-locals:Int) :
     add(a, stack-pointer(), -1 * (SIZEOF-STACK-FRAME + num-locals * SIZEOF-LONG))
@@ -717,6 +729,10 @@ public defn encode (fid:Int, func:VMFunction,
       FNENTRY-OPCODE :
         plop("A FNENTRY")
         ; dump-state(a, "FNENTRY:\n")
+        val start-label = new-label(a)
+        bind(a, start-label)
+        lea(a, tmp1(), MemPtr(start-label, 0))
+        dump(a, "FNENTRY %p\n", tmp1()) when debugging?
         val all-good-label = new-label(a)
         val extend-return-label = new-label(a)
         val frame-size = value * SIZEOF-LONG + SIZEOF-STACK-FRAME
@@ -729,10 +745,10 @@ public defn encode (fid:Int, func:VMFunction,
         jle(a, all-good-label)
         CONST(tmp3(), size-required)
         lea(a, tmp2(), MemPtr(extend-return-label, 0))
-        dump(a, "STACK-OVERFLOW %p RETURN-LABEL %p\n", tmp3(), tmp2()) ; when debugging?
+        dump(a, "STACK-OVERFLOW %p RETURN-LABEL %p\n", tmp3(), tmp2()) when debugging?
         jmp(a, CONST(tmp1(), extend-stack-launch-value))
         bind(a, extend-return-label)
-        dump(a, "STACK GOOD TOP %p LIMIT %p\n", heap-top(rax()), heap-limit(rax())) ; when debugging?
+        dump(a, "STACK GOOD %p LIMIT %p\n", stack-pointer(), compute-stack-limit(a, rax())) when debugging?
         bind(a, all-good-label)
       DISPATCH-OPCODE :
         plop("A DISPATCH")
@@ -1058,8 +1074,6 @@ public defn encode (fid:Int, func:VMFunction,
         val faddr = LOCAL(value)
         c-trampoline(a, faddr, registers(), registers())
         RESTORE-STATE(a)
-        get-return(a, tmp1())
-        jmp(a, tmp1())
         POP-FRAME(num-locals)
         bind(a, end-label)
       TYPEOF-OPCODE :
@@ -2126,7 +2140,7 @@ public defn encode (fid:Int, func:VMFunction,
       
     defn before-call-dump (entry:False|StackTraceEntry) :
       match(entry:StackTraceEntry) :
-        dump(a, ">>> %s\n", CONST(tmp1(), printf-format(to-string(entry)))) when (debugging? or tracing?)
+        dump(a, ">>> %s\n", CONST(rax(), printf-format(to-string(entry)))) when (debugging? or tracing?)
 
     ;Encode each instruction
     defn emit-ins (ins:VMIns) :
