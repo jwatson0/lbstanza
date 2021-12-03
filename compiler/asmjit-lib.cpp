@@ -336,6 +336,12 @@ const Gp* x86_cl(void) {
 const Gp* x86_dl(void) {
   return &dl;
 }
+const Gp* x86_sil(void) {
+  return &sil;
+}
+const Gp* x86_dil(void) {
+  return &dil;
+}
 const Gp* x86_eax(void) {
   return &eax;
 }
@@ -344,6 +350,12 @@ const Gp* x86_rax(void) {
 }
 const Gp* x86_ecx(void) {
   return &ecx;
+}
+const Gp* x86_esi(void) {
+  return &esi;
+}
+const Gp* x86_edi(void) {
+  return &edi;
 }
 const Gp* x86_rcx(void) {
   return &rcx;

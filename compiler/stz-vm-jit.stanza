@@ -257,15 +257,31 @@ defn registers () :      r9()
 defn stack-pointer () :  r10()
 defn stk () :            r11()
 defn functions () :      r12()
-defn tmp1 () :           r13()
-defn tmp2 () :           r14()
-defn tmp1i () :          r13d()
-defn tmp2i () :          r14d()
-defn tmp1b () :          r13b()
-defn tmp2b () :          r14b()
-defn tmp3 () :           r15()
-defn tmp3i () :          r15d()
-defn tmp3b () :          r15b()
+
+defn tmp1 () :           rbx()
+defn tmp1i () :          ebx()
+defn tmp1b () :          bl()
+defn tmp2 () :           rsi()
+defn tmp2i () :          esi()
+defn tmp2b () :          sil()
+defn tmp3 () :           rdi()
+defn tmp3i () :          edi()
+defn tmp3b () :          dil()
+
+defn loc1 () :           r13()
+defn loc1i () :          r13d()
+defn loc1b () :          r13b()
+defn loc2 () :           r14()
+defn loc2i () :          r14d()
+defn loc2b () :          r14b()
+defn loc3 () :           r15()
+defn loc3i () :          r15d()
+defn loc3b () :          r15b()
+
+defn loc-regs () : [loc1(), loc2(), loc3()]
+; defn num-loc-regs () : length(loc-regs())
+defn num-loc-regs () : 0
+
 ; defn caller-saved-registers () : [r8(), r9(), r10(), r11(), rdx()] ;TODO: this is what the C calling convention says you have to save
 defn caller-saved-registers () : [vmstate(), registers(), functions(), stack-pointer(), stk(), tmp1(), tmp2(), tmp3()]
 defn etc-saved-registers () : [vmstate(), registers(), functions(), stack-pointer(), stk(), tmp1(), tmp2(), tmp3()]
@@ -307,29 +323,23 @@ lostanza defn printf-format (s:ref<String>) -> ref<Long> :
 lostanza defn printf-addr () -> ref<Long> :
   return new Long{addr!(printf) as long}
 
-defn etc-save-registers (a:Assembler) :
-  for reg in etc-saved-registers() do :
-    push(a, reg)
+defn save-registers (a:Assembler, regs:Seqable<Gp>) :
+  for reg in regs do : push(a, reg)
 
-defn etc-restore-registers (a:Assembler) :
-  for reg in reverse $ to-list $ etc-saved-registers() do :
-    pop(a, reg)
+defn restore-registers (a:Assembler, regs:Seqable<Gp>) :
+  for reg in reverse $ to-list $ regs do : pop(a, reg)
 
-defn caller-save-registers (a:Assembler) :
-  for reg in caller-saved-registers() do :
-    push(a, reg)
+defn etc-save-registers (a:Assembler) : save-registers(a, etc-saved-registers())
+defn etc-restore-registers (a:Assembler) : restore-registers(a, etc-saved-registers())
 
-defn caller-restore-registers (a:Assembler) :
-  for reg in reverse $ to-list $ caller-saved-registers() do :
-    pop(a, reg)
+defn caller-save-registers (a:Assembler) : save-registers(a, caller-saved-registers())
+defn caller-restore-registers (a:Assembler) : restore-registers(a, caller-saved-registers())
 
-defn all-save-registers (a:Assembler) :
-  for reg in all-saved-registers() do :
-    push(a, reg)
+defn all-save-registers (a:Assembler) : save-registers(a, all-saved-registers())
+defn all-restore-registers (a:Assembler) : restore-registers(a, all-saved-registers())
 
-defn all-restore-registers (a:Assembler) :
-  for reg in reverse $ to-list $ all-saved-registers() do :
-    pop(a, reg)
+defn loc-save-registers (a:Assembler) : save-registers(a, loc-regs())
+defn loc-restore-registers (a:Assembler) : restore-registers(a, loc-regs())
 
 defn dump (a:Assembler, format:String, a0:Gp, a1:Gp, a2:Gp) :
   all-save-registers(a)
@@ -618,8 +628,13 @@ public defn encode (fid:Int, func:VMFunction,
   defn SET-REG-INT (r:Int, v:Gp) :
     movsxd(a, v, v)
     SET-REG(r, v)
+  defn local-access (l:Int) :
+    if l < num-loc-regs() :
+      loc-regs()[l]
+    else :
+      MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET)    
   defn SET-LOCAL (l:Int, v:Gp) :
-    mov(a, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET), v)
+    mov(a, local-access(l), v)
     dump(a, "  SET-LOCAL[%d] = %p\n", CONST(rax(), l), v) when debugging? 
     dump(a, "  SET-LOCAL[%d] = %p\n", CONST(rax(), l), v) when tracing? 
   defn SET-LOCAL-BYTE (l:Int, v:Gp) :
@@ -629,23 +644,23 @@ public defn encode (fid:Int, func:VMFunction,
     movsxd(a, v, v)
     SET-LOCAL(l, v)
   defn SET-LOCAL-FLOAT (l:Int,v:Xmm) :
-    movsd(a, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET), v)
+    movsd(a, local-access(l), v)
     dump(a, "SET-LOCAL-FLOAT[%d] %p\n", CONST(rax(), l), LOCAL(tmp1(), l)) when debugging? 
   defn SET-LOCAL-DOUBLE (l:Int, v:Xmm) :
-    movsd(a, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET), v)
+    movsd(a, local-access(l), v)
     false
 
   defn LOCAL (dst:Gp, l:Int) -> Gp :
-    mov(a, dst, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET)) 
+    mov(a, dst, local-access(l)) 
     dst
   defn LOCAL (l:Int) -> Gp : LOCAL(tmp2(), l)
   defn LOCAL-FLOAT (dst:Xmm, l:Int) -> Xmm :
-    movss(a, dst, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET, SIZEOF-INT))
+    movss(a, dst, local-access(l))
     dst
   defn LOCAL-FLOAT (l:Int) -> Xmm :
     LOCAL-FLOAT(xmm0(), l)
   defn LOCAL-DOUBLE (dst:Xmm, l:Int) -> Xmm :
-    movsd(a, dst, MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET))
+    movsd(a, dst, local-access(l))
     dst
   defn LOCAL-DOUBLE (l:Int) -> Xmm :
     LOCAL-DOUBLE(xmm0(), l)
@@ -1657,7 +1672,7 @@ public defn encode (fid:Int, func:VMFunction,
         val num-bytes = tmp3()
         LOCAL(num-bytes, y)
         add(a, num-bytes, 8 + 7)
-        and-op(a, num-bytes, CONST(rdi(), (- 8L)))
+        and-op(a, num-bytes, CONST(tmp1(), (- 8L)))
         do-alloc(value, num-bytes)
       ALLOC-OPCODE-CONST :
         plop("C ALLOC-CONST X %_ Y %_ VALUE %_" % [x, y, value])

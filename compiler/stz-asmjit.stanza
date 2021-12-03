@@ -117,10 +117,14 @@ extern x86_al: () -> ptr<?>
 extern x86_bl: () -> ptr<?>
 extern x86_cl: () -> ptr<?>
 extern x86_dl: () -> ptr<?>
+extern x86_sil: () -> ptr<?>
+extern x86_dil: () -> ptr<?>
 extern x86_eax: () -> ptr<?>
 extern x86_ebx: () -> ptr<?>
 extern x86_ecx: () -> ptr<?>
 extern x86_edx: () -> ptr<?>
+extern x86_esi: () -> ptr<?>
+extern x86_edi: () -> ptr<?>
 extern x86_rax: () -> ptr<?>
 extern x86_rcx: () -> ptr<?>
 extern x86_rdx: () -> ptr<?>
@@ -205,6 +209,10 @@ public lostanza defn cl () -> ref<Gp> :
   return new Gp{ call-c x86_cl() }
 public lostanza defn dl () -> ref<Gp> :
   return new Gp{ call-c x86_dl() }
+public lostanza defn sil () -> ref<Gp> :
+  return new Gp{ call-c x86_sil() }
+public lostanza defn dil () -> ref<Gp> :
+  return new Gp{ call-c x86_dil() }
 public lostanza defn eax () -> ref<Gp> :
   return new Gp{ call-c x86_eax() }
 public lostanza defn ebx () -> ref<Gp> :
@@ -213,6 +221,10 @@ public lostanza defn ecx () -> ref<Gp> :
   return new Gp{ call-c x86_ecx() }
 public lostanza defn edx () -> ref<Gp> :
   return new Gp{ call-c x86_edx() }
+public lostanza defn esi () -> ref<Gp> :
+  return new Gp{ call-c x86_esi() }
+public lostanza defn edi () -> ref<Gp> :
+  return new Gp{ call-c x86_edi() }
 public lostanza defn rax () -> ref<Gp> :
   return new Gp{ call-c x86_rax() }
 public lostanza defn rcx () -> ref<Gp> :
@@ -490,6 +502,12 @@ public lostanza defn movss (a:ref<Assembler>, dst:ref<MemPtr>, src:ref<Xmm>) -> 
 public lostanza defn movss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<MemPtr>) -> ref<False> :
   call-c assembler_movss_mem_xmm(a.value, dst.value, src.value)
   return false
+public lostanza defn movss (a:ref<Assembler>, dst:ref<Gp>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_mov_xmm_reg(a.value, dst.value, src.value)
+  return false
+public lostanza defn movss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_mov_reg_xmm(a.value, dst.value, src.value)
+  return false
 public lostanza defn movsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
   call-c assembler_movsd_xmm_xmm(a.value, dst.value, src.value)
   return false
@@ -498,6 +516,12 @@ public lostanza defn movsd (a:ref<Assembler>, dst:ref<MemPtr>, src:ref<Xmm>) -> 
   return false
 public lostanza defn movsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<MemPtr>) -> ref<False> :
   call-c assembler_movsd_mem_xmm(a.value, dst.value, src.value)
+  return false
+public lostanza defn movsd (a:ref<Assembler>, dst:ref<Gp>, src:ref<Xmm>) -> ref<False> :
+  call-c assembler_mov_xmm_reg(a.value, dst.value, src.value)
+  return false
+public lostanza defn movsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Gp>) -> ref<False> :
+  call-c assembler_mov_reg_xmm(a.value, dst.value, src.value)
   return false
 public lostanza defn cvtsd2ss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
   call-c assembler_cvtsd2ss(a.value, dst.value, src.value)

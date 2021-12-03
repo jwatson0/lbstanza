@@ -128,11 +128,15 @@ extern "C" {
   const Gp* x86_bl(void);
   const Gp* x86_cl(void);
   const Gp* x86_dl(void);
+  const Gp* x86_sil(void);
+  const Gp* x86_dil(void);
   const Gp* x86_eax(void);
   const Gp* x86_rax(void);
   const Gp* x86_rcx(void);
-  const Gp* x86_ecx(void);
   const Gp* x86_rdx(void);
+  const Gp* x86_ecx(void);
+  const Gp* x86_esi(void);
+  const Gp* x86_edi(void);
   const Gp* x86_edx(void);
   const Gp* x86_rbx(void);
   const Gp* x86_ebx(void);
