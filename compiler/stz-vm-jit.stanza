@@ -629,7 +629,6 @@ public defn encode (fid:Int, func:VMFunction,
       add(a, stack-pointer(), SIZEOF-STACK-FRAME + num-locals * SIZEOF-LONG)
       lea(a, tmp1(), MemPtr(ret-addr, 0))
       set-return(a, tmp1())
-      dump(a, "PUSH-FRAME NL %d %p RET %p\n" CONST(rax(), num-locals), stack-pointer(), tmp1()) when debugging?
 
     defn POP-FRAME (num-locals:Int) :
       add(a, stack-pointer(), -1 * (SIZEOF-STACK-FRAME + num-locals * SIZEOF-LONG))
@@ -644,7 +643,6 @@ public defn encode (fid:Int, func:VMFunction,
 
     defn do-tcall (f:Gp) :
       mov(a, tmp1(), MemPtr(functions(), f, 3, 0, SIZEOF-LONG))
-      dump(a, "CALLING %d %p\n", f, tmp1()) when debugging?
       jmp(a, tmp1())
 
     defn do-call (f:Gp, num-locals:Int) :
@@ -682,15 +680,12 @@ public defn encode (fid:Int, func:VMFunction,
       trace-opcode(opcode)
       switch(opcode) :
         GOTO-OPCODE : 
-          plop("A GOTO")
-          dump(a, "GOTO\n") when debugging?
           jmp(a, value as Label)
 
     defn emit-ins-a (opcode:Int, value:Int) :
       trace-opcode(opcode, value)
       switch(opcode) :
         FNENTRY-OPCODE :
-          ; dump-state(a, "FNENTRY:\n")
           val start-label = new-label(a)
           bind(a, start-label)
           lea(a, tmp1(), MemPtr(start-label, 0))
@@ -1816,7 +1811,6 @@ public defn encode (fid:Int, func:VMFunction,
                 (l:FRegLoc) : 1
             if not empty?(xs(ins)) :
               val x = xs(ins)[0]
-              dump(a, "GET-REG RET\n") when debugging?
               get-reg(x, return-register-index(return(records)))
           (ins:YieldIns) :
             set-regs(ys(ins))
@@ -1826,7 +1820,6 @@ public defn encode (fid:Int, func:VMFunction,
             get-regs(xs(ins))
           (ins:ReturnIns) :
             set-regs(xs(ins))
-            plop("RET SET-REGS %_" % [xs(ins)])
             emit-ins-a(RETURN-OPCODE, 0)
           (ins:DumpIns) :
             for x in xs(ins) do :
