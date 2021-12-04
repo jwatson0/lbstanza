@@ -1,11 +1,14 @@
 defpackage stz/asmjit :
   import core
 
+extern printf: (ptr<byte>, ? ...) -> int
+
 extern jit_runtime_new: () -> ptr<?>
 extern jit_runtime_delete: (ptr<?>) -> int
 extern jit_runtime_add: (ptr<?>, ptr<?>) -> ptr<?>
 extern jit_runtime_release: (ptr<?>, ptr<?>) -> int
 extern code_holder_new: (ptr<?>) -> ptr<?>
+extern code_holder_reset: (ptr<?>) -> int
 extern code_holder_delete: (ptr<?>) -> int
 extern code_holder_label_offset: (ptr<?>, ptr<?>) -> int
 extern assembler_new: (ptr<?>) -> ptr<?>
@@ -165,7 +168,7 @@ public lostanza deftype Rip :
   value: ptr<?>
 public lostanza deftype Xmm :
   value: ptr<?>
-public lostanza deftype Func :
+public lostanza deftype Func <: Unique :
   value: ptr<?>
 public lostanza deftype MemPtr :
   value: ptr<?>
@@ -284,14 +287,29 @@ public lostanza defn delete (rt:ref<JitRuntime>) -> ref<False> :
   call-c jit_runtime_delete(rt.value)
   return false
 public lostanza defn add (rt:ref<JitRuntime>, c:ref<CodeHolder>) -> ref<Func> :
-  return new Func{ call-c jit_runtime_add(rt.value, c.value) }
+  val func = new Func{ call-c jit_runtime_add(rt.value, c.value) }
+  ; call-c printf("CREATING FUNC %p\n", func.value)
+  ; add-finalizer(new FuncFinalizer{rt.value, func.value}, func)
+  return func
+lostanza deftype FuncFinalizer <: Finalizer :
+  rt : ptr<?>
+  var func: ptr<?>
+lostanza defmethod run (f:ref<FuncFinalizer>) -> ref<False> :
+  if f.func != (0L as ptr<?>) :
+    ; call-c printf("DELETING FUNC %p\n", f.func)
+    call-c jit_runtime_release(f.rt, f.func)
+    f.func = (0L as ptr<?>)
+  return false
 public lostanza defn release (rt:ref<JitRuntime>, func:ref<Func>) -> ref<False> :
   call-c jit_runtime_release(rt.value, func.value)
   return false
 public lostanza defn code-holder-new (rt:ref<JitRuntime>) -> ref<CodeHolder> :
   return new CodeHolder{ call-c code_holder_new(rt.value) }
+public lostanza defn reset (c:ref<CodeHolder>) -> ref<False> :
+  call-c code_holder_reset(c.value)
+  return false
 public lostanza defn delete (c:ref<CodeHolder>) -> ref<False> :
-  call-c jit_runtime_delete(c.value)
+  call-c code_holder_delete(c.value)
   return false
 public lostanza defn label-offset (c:ref<CodeHolder>, f:ref<Label>) -> ref<Int> :
   return new Int{ call-c code_holder_label_offset(c.value, f.value) }
@@ -598,3 +616,14 @@ public lostanza defn ucomisd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> r
 public lostanza defn embed (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
   call-c assembler_embed_label(a.value, lab.value)
   return false
+
+public defn gen-code (f: (CodeHolder, Assembler) -> ?, rt:JitRuntime) -> Func :
+  val code = code-holder-new(rt)
+  val assembler = assembler-new(code)
+  f(code, assembler)
+  val func = add(rt, code)
+  delete(assembler)
+  reset(code)
+  delete(code)
+  func
+  

@@ -15,11 +15,12 @@ extern "C" {
   void* jit_runtime_add(JitRuntime* rt, CodeHolder *c);
   void jit_runtime_release(JitRuntime* rt, void *c);
   CodeHolder* code_holder_new(JitRuntime *rt);
+  void code_holder_reset(CodeHolder *c);
   void code_holder_delete(CodeHolder *c);
   int code_holder_label_offset(CodeHolder *c, Label *f);
   Assembler* assembler_new(CodeHolder *c);
-  Label* assembler_new_label(Assembler *a);
   void assembler_delete(Assembler *a);
+  Label* assembler_new_label(Assembler *a);
   void assembler_bind(Assembler *a, Label *f);
   void assembler_push(Assembler *a, Gp *reg);
   void assembler_pop(Assembler *a, Gp *reg);

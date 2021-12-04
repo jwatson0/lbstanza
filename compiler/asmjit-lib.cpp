@@ -31,6 +31,9 @@ int code_holder_label_offset(CodeHolder *c, Label *f) {
 void code_holder_delete(CodeHolder *c) {
   delete c;
 }
+void code_holder_reset(CodeHolder *c) {
+  c->reset();
+}
 Assembler* assembler_new(CodeHolder *c) {
   return new Assembler(c);
 }
