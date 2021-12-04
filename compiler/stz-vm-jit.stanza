@@ -15,7 +15,7 @@ defpackage stz/vm-jit :
   import core/stack-trace
 
 val debugging? = false
-val tracing? = true
+val tracing? = false
 
 defn plop (x) : println(x) when debugging?
 
