@@ -15,7 +15,7 @@ defpackage stz/vm-jit :
   import core/stack-trace
 
 val debugging? = false
-val tracing? = false
+val tracing? = true
 
 defn plop (x) : println(x) when debugging?
 
@@ -300,10 +300,8 @@ val FLOAT-TAG-BITS = 5
 val SYSTEM-RETURN-STUB = -2
 
 defn do-BOOLREF (a:Assembler, x:Gp) -> Gp :
-  dump(a, "BOOLREF %d -> " x) when debugging?
   shl(a, x, 3)
   add(a, x, MARKER-TAG-BITS)
-  dump(a, "%p\n" x) when debugging?
   x
 
 extern malloc: (long) -> ptr<?>
@@ -399,12 +397,13 @@ lostanza defn dump-memory-32 (a:ref<Assembler>, start:ref<Gp>, n:ref<Long>) -> r
 lostanza defn dump-memory-64 (a:ref<Assembler>, start:ref<Gp>, n:ref<Long>) -> ref<False> :
   return dump-memory-x(a, dump-memory-64-addr(), start, n)
 
+;Entry point for launching JIT session
 public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
   within (code, a) = gen-code(rt) :
     ; Setup JIT registers
     val out? = debugging? ; or tracing?
-    mov(a, tmp1(), c-params()[0])
-    push(a, tmp1()) ;PUSHING RSP
+    mov(a, tmp1(), c-params()[0]) ;CRSP is first argument
+    push(a, tmp1())               ;Pushing CRSP for access from crsp instruction 
     mov(a, tmp1(), MemPtr(rsp(), 0))
     mov(a, vmstate(), vms)
     get-registers(a, registers())
@@ -414,14 +413,13 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
     val ret-label = new-label(a)
     lea(a, tmp2(), MemPtr(ret-label))
     set-return(a, tmp2())
-    ; call init
     get-heap-top(a, tmp1())
     get-global-mem(a, tmp1())
     mov(a, tmp1(), MemPtr(functions(), init-id * SIZEOF-LONG))
     jmp(a, tmp1())
     bind(a, ret-label)
     SAVE-STATE-ONLY(a)
-    pop(a, tmp1()) ;POPPING CRSP
+    pop(a, tmp1())                ;POPPING CRSP
     ret(a)
 
 defn CONST (a:Assembler, x:Gp, id:Int|Long) -> Gp :
@@ -464,6 +462,17 @@ defn RESTORE-STATE (a:Assembler) :
   untag-stack(a, stk(), get-current-stack(a, tmp1()))
   get-stack-pointer(a, stack-pointer())
 
+defn swap-current-and-system-state (a:Assembler) :
+  get-current-stack(a, tmp1())
+  set-current-stack(a, get-system-stack(a, rax()))
+  set-system-stack(a, tmp1())
+  set-registers(a, get-system-registers(a, rax()))
+  set-system-registers(a, registers())
+  ;Restore stack state
+  untag-stack(a, stk(), get-current-stack(a, tmp1()))
+  get-stack-pointer(a, stack-pointer())
+  get-registers(a, registers())
+
 public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func) -> Func : 
   within (code, a) = gen-code(rt) :
     val end-label     = tmp2()
@@ -472,15 +481,7 @@ public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func)
     set-stack-pointer(a, stack-pointer())
     set-pc(a, end-label)
     ;Swap stack and registers
-    get-current-stack(a, tmp1())
-    set-current-stack(a, get-system-stack(a, rax()))
-    set-system-stack(a, tmp1())
-    set-registers(a, get-system-registers(a, rax()))
-    set-system-registers(a, registers())
-    ;Restore stack state
-    untag-stack(a, stk(), get-current-stack(a, tmp1()))
-    get-stack-pointer(a, stack-pointer())
-    get-registers(a, registers())
+    swap-current-and-system-state(a)
     ;Set arguments
     SET-REG(a, 0, do-BOOLREF(a, CONST(a, tmp1(), 0)))
     SET-REG(a, 1, CONST(a, tmp1(), 1))
@@ -495,15 +496,7 @@ public defn make-extend-stack-return (rt:JitRuntime) -> Func :
     ;System stack no longer needed
     set-stack-pointer(a, CONST(a, tmp1(), 0))
     ;Swap stack and registers
-    get-current-stack(a, tmp1())
-    set-current-stack(a, get-system-stack(a, rax()))
-    set-system-stack(a, tmp1())
-    set-registers(a, get-system-registers(a, rax()))
-    set-system-registers(a, registers())
-    ;Restore stack state
-    untag-stack(a, stk(), get-current-stack(a, tmp1()))
-    get-stack-pointer(a, stack-pointer())
-    get-registers(a, registers())
+    swap-current-and-system-state(a)
     ;Continue where we were
     get-pc(a, tmp2())
     jmp(a, tmp2())
@@ -605,10 +598,10 @@ public defn encode (fid:Int, func:VMFunction,
       SET-LOCAL(l, v)
     defn SET-LOCAL-FLOAT (l:Int,v:Xmm) :
       movsd(a, local-access(l), v)
-      dump(a, "SET-LOCAL-FLOAT[%d] %p\n", CONST(rax(), l), LOCAL(tmp1(), l)) when debugging? 
+      dump(a, "SET-LOCAL-FLOAT[%d] %p\n", CONST(rax(), l), LOCAL(tmp1(), l)) when (debugging? or tracing?)
     defn SET-LOCAL-DOUBLE (l:Int, v:Xmm) :
       movsd(a, local-access(l), v)
-      false
+      dump(a, "SET-LOCAL-DOUBLE[%d] %p\n", CONST(rax(), l), LOCAL(tmp1(), l)) when (debugging? or tracing?)
 
     defn LOCAL (dst:Gp, l:Int) -> Gp :
       mov(a, dst, local-access(l)) 
@@ -625,8 +618,11 @@ public defn encode (fid:Int, func:VMFunction,
     defn LOCAL-DOUBLE (l:Int) -> Xmm :
       LOCAL-DOUBLE(xmm0(), l)
 
-    defn PUSH-FRAME (num-locals:Int, ret-addr:Label) :
+    defn PUSH-FRAME-ONLY (num-locals:Int) :
       add(a, stack-pointer(), SIZEOF-STACK-FRAME + num-locals * SIZEOF-LONG)
+
+    defn PUSH-FRAME (num-locals:Int, ret-addr:Label) :
+      PUSH-FRAME-ONLY(num-locals)
       lea(a, tmp1(), MemPtr(ret-addr, 0))
       set-return(a, tmp1())
 
@@ -664,20 +660,20 @@ public defn encode (fid:Int, func:VMFunction,
     defn trace-opcode (opcode:Int) :
       do-trace-opcode(opcode, "") when tracing?
 
-    defn trace-opcode (opcode:Int, x:Int) :
+    defn trace-opcode (opcode:Int, x:Int|Label) :
       do-trace-opcode(opcode, string-join $ [" " x]) when tracing?
 
     defn trace-opcode (opcode:Int, x:Int, y:Int|Long) :
       do-trace-opcode(opcode, string-join $ [" " x " " y]) when tracing?
 
-    defn trace-opcode (opcode:Int, x:Int, y:Int, z:Int) :
+    defn trace-opcode (opcode:Int, x:Int|Label, y:Int, z:Int|Label) :
       do-trace-opcode(opcode, string-join $ [" " x " " y " " z]) when tracing?
 
-    defn trace-opcode (opcode:Int, w:Int, x:Int, y:Int, z:Int) :
+    defn trace-opcode (opcode:Int, w:Int, x:Int, y:Int|Label, z:Int|Label) :
       do-trace-opcode(opcode, string-join $ [" " w " " x " " y " " z]) when tracing?
 
     defn emit-ins-a (opcode:Int, value:Label) :
-      trace-opcode(opcode)
+      trace-opcode(opcode, value)
       switch(opcode) :
         GOTO-OPCODE : 
           jmp(a, value as Label)
@@ -718,9 +714,9 @@ public defn encode (fid:Int, func:VMFunction,
           val num-locals = value
           POP-FRAME(num-locals)
         ENTER-STACK-OPCODE :
+          val saved-label = new-label(a)
           ;Save current stack
           set-stack-pointer(a, stack-pointer())
-          val saved-label = new-label(a)
           lea(a, tmp1(), MemPtr(saved-label, 0))
           set-pc(a, tmp1())
           ;Load next stack
@@ -773,7 +769,7 @@ public defn encode (fid:Int, func:VMFunction,
         C-RSP-OPCODE :
           SET-LOCAL(value, GET-CRSP(tmp1()))
         else :
-          plop("MISSING A OPCODE %_" % [opcode])
+          fatal("MISSING A OPCODE %_" % [opcode])
 
     defn TAG (dst:Gp, x:Gp, tag:Int) -> Gp:
       ;MIGHT BE ABLE TO DO THIS WITH ADDRESSING MODE
@@ -914,7 +910,14 @@ public defn encode (fid:Int, func:VMFunction,
         GET-REG-OPCODE :
           SET-LOCAL(x, GET-REG(tmp1(), value))
         else :
-          plop("MISSING B OPCODE %_" % [opcode])
+          fatal("MISSING B OPCODE %_" % [opcode])
+
+    defn do-callc (num-locals:Int, faddr:Gp) :
+      PUSH-FRAME-ONLY(num-locals)
+      SAVE-STATE(a)
+      c-trampoline(a, faddr, registers(), registers())
+      RESTORE-STATE(a)
+      POP-FRAME(num-locals)
 
     defn emit-ins-c (opcode:Int, x:Int, value:Int) :
       trace-opcode(opcode, x, value)
@@ -931,15 +934,7 @@ public defn encode (fid:Int, func:VMFunction,
           mov(a, tmp2(), MemPtr(LOCAL(tmp1(), value), FUNCTION-CODE-OFFSET + SIZEOF-LONG - REF-TAG-BITS))
           do-call(tmp2(), x)
         CALLC-OPCODE-LOCAL :
-          val end-label = new-label(a)
-          val num-locals = x
-          PUSH-FRAME(num-locals, end-label)
-          SAVE-STATE(a)
-          val faddr = LOCAL(value)
-          c-trampoline(a, faddr, registers(), registers())
-          RESTORE-STATE(a)
-          POP-FRAME(num-locals)
-          bind(a, end-label)
+          do-callc(x, LOCAL(value))
         TYPEOF-OPCODE :
           read-dispatch-table(a, tmp3(), vmstate(), CONST(tmp2(), value))
           SET-LOCAL(x, tmp3())
@@ -987,10 +982,10 @@ public defn encode (fid:Int, func:VMFunction,
           mov(a, tmp2(), MemPtr(const-table(rax()), CONST(tmp1(), value), 3, 0))
           SET-LOCAL(x, tmp2())
         else :
-          plop("MISSING C OPCODE %_" % [opcode])
+          fatal("MISSING C OPCODE %_" % [opcode])
 
     defn emit-ins-c (opcode:Int, x:Label, y:Int, value:Int) :
-      trace-opcode(opcode, y, value)
+      trace-opcode(opcode, x, y, value)
       defn do-reserve (size:Gp, num-locals:Int) :
         add(a, heap-top(tmp2()), size)
         cmp(a, tmp2(), heap-limit(rax()))
@@ -1013,7 +1008,7 @@ public defn encode (fid:Int, func:VMFunction,
           do-reserve(CONST(tmp3(), value), y)
 
     defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Label) :
-      trace-opcode(opcode, x, y)
+      trace-opcode(opcode, x, y, value)
       switch(opcode) :
         JUMP-REG-OPCODE :
           val reg = x
@@ -1376,28 +1371,19 @@ public defn encode (fid:Int, func:VMFunction,
         ALLOC-OPCODE-CONST :
           do-alloc(value, CONST(tmp3(), 8 + y))
         else :
-          plop("MISSING C OPCODE %_" % [opcode])
+          fatal("MISSING C OPCODE %_" % [opcode])
 
     defn emit-ins-d (opcode:Int, x:Int, value:Long) :
       trace-opcode(opcode, x, value)
       switch(opcode) :
         CALLC-OPCODE-WIDE : 
-          val end-label = new-label(a)
-          val faddr = value
-          val num_locals = x
-          PUSH-FRAME(num_locals, end-label)
-          SAVE-STATE(a)
-          mov(a, tmp1(), faddr)
-          c-trampoline(a, tmp1(), registers(), registers())
-          RESTORE-STATE(a)
-          POP-FRAME(num_locals)
-          bind(a, end-label)
+          do-callc(x, CONST(tmp1(), value))
         SET-OPCODE-WIDE :
           SET-LOCAL(x, CONST(tmp1(), value))
         SET-REG-OPCODE-WIDE :
           SET-REG(x, CONST(tmp1(), value))
         else :
-          plop("MISSING D OPCODE %_" % [opcode])
+          fatal("MISSING D OPCODE %_" % [opcode])
 
     defn emit-ins-e (opcode:Int, x:Int, y:Int, z:Int, value:Int) :
       trace-opcode(opcode, x, y, z, value)
@@ -1441,7 +1427,7 @@ public defn encode (fid:Int, func:VMFunction,
           mov(a, tmp3(), MemPtr(LOCAL(tmp2(), y), LOCAL(tmp1(), z), 0, value, SIZEOF-LONG))
           SET-LOCAL(x, tmp3())
         else :
-          plop("MISSING E OPCODE %_" % [opcode])
+          fatal("MISSING E OPCODE %_" % [opcode])
 
     defn jump-op-reg (x:Gp, y:Gp, f:(Assembler, Label) -> False, cmp:(Assembler, Gp, Gp) -> False, n1:Label, n2:Label) :
       cmp(a, x, y)
@@ -1463,7 +1449,7 @@ public defn encode (fid:Int, func:VMFunction,
       jump-op-xmm(LOCAL-DOUBLE(xmm0(), x), LOCAL-DOUBLE(xmm1(), y), f, ucomisd, n1, n2)
 
     defn emit-ins-f (opcode:Int, x:Int, y:Int, n1:Label, n2:Label) :
-      trace-opcode(opcode, x, y)
+      trace-opcode(opcode, x, y, n1, n2)
       switch(opcode) :
         JUMP-TAGBITS-OPCODE :
           and-op(a, LOCAL(tmp1(), x), CONST(tmp2(), 0x7))
@@ -1569,11 +1555,10 @@ public defn encode (fid:Int, func:VMFunction,
         JUMP-UGE-OPCODE-LONG :
           jump-op(x, y, jae, cmp, n1, n2)
         else : 
-          plop("MISSING F OPCODE %_" % [opcode])
+          fatal("MISSING F OPCODE %_" % [opcode])
 
     defn emit-ins-targets (dests:Tuple<Label>) :
       for (d in dests, i in 0 to false) do :
-        plop("TARGET %_" % [i])
         embed(a, d)
 
     ;Encode multivarity functions
@@ -1728,7 +1713,7 @@ public defn encode (fid:Int, func:VMFunction,
         match(ins) :
           (ins:LabelIns) :
             val lab = maybe-add-new-label(n(ins))
-            plop("LABEL %_" % [n(ins)])
+            dump(a, string-join $ [lab, ":\n"]) when tracing?
             bind(a, lab)
           (ins:UnreachableIns) :
             false
@@ -1999,7 +1984,7 @@ public defn encode (fid:Int, func:VMFunction,
           (y:ExternId) : extern-address(id(y))
           (y:GlobalId) : id(y)
           (y:DataId) : id(y)
-          (y:ConstId) : (plop("CONST ID %_" % [id(y)]), id(y))
+          (y:ConstId) : id(y)
 
       ;Set register
       defn set-reg (i:Int, y:VMImm) :

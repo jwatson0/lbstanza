@@ -160,8 +160,10 @@ public lostanza deftype CodeHolder :
   value: ptr<?>
 public lostanza deftype Assembler :
   value: ptr<?>
+  var next-id: int
 public lostanza deftype Label :
   value: ptr<?>
+  id: int
 public lostanza deftype Gp :
   value: ptr<?>
 public lostanza deftype Rip :
@@ -172,6 +174,16 @@ public lostanza deftype Func <: Unique :
   value: ptr<?>
 public lostanza deftype MemPtr :
   value: ptr<?>
+
+public lostanza defn id (l:ref<Label>) -> ref<Int> :
+  return new Int{l.id}
+defmethod print (o:OutputStream, l:Label) :
+  print(o, "L%_" % [id(l)])
+
+lostanza defn next-id (a:ref<Assembler>) -> ref<Int> :
+  val id = a.next-id
+  a.next-id = a.next-id + 1
+  return new Int{id}
 
 public lostanza defn value (f:ref<Func>) -> ref<Long> :
   return new Long{f.value as long}
@@ -314,9 +326,9 @@ public lostanza defn delete (c:ref<CodeHolder>) -> ref<False> :
 public lostanza defn label-offset (c:ref<CodeHolder>, f:ref<Label>) -> ref<Int> :
   return new Int{ call-c code_holder_label_offset(c.value, f.value) }
 public lostanza defn assembler-new (c:ref<CodeHolder>) -> ref<Assembler> :
-  return new Assembler{ call-c assembler_new(c.value) }
+  return new Assembler{ call-c assembler_new(c.value), 0 }
 public lostanza defn new-label (a:ref<Assembler>) -> ref<Label> :
-  return new Label{ call-c assembler_new_label(a.value) }
+  return new Label{ call-c assembler_new_label(a.value), next-id(a).value }
 public lostanza defn delete (a:ref<Assembler>) -> ref<False> :
   call-c assembler_delete(a.value)
   return false
