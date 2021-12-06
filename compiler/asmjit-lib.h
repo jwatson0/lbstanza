@@ -72,7 +72,8 @@ extern "C" {
   void assembler_shl_reg(Assembler *a, const Gp *dst, const Gp *src);
   void assembler_shr_reg(Assembler *a, const Gp *dst, const Gp *src);
   void assembler_ashr_reg(Assembler *a, const Gp *dst, const Gp *src);
-  void assembler_cmp(Assembler *a, const Gp *x, const Gp *y);
+  void assembler_cmp_reg(Assembler *a, const Gp *x, const Gp *y);
+  void assembler_cmp_int(Assembler *a, const Gp *x, int);
   void assembler_set_e(Assembler *a, const Gp *x);
   void assembler_set_ne(Assembler *a, const Gp *x);
   void assembler_set_s(Assembler *a, const Gp *x);

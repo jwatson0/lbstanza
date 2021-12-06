@@ -806,7 +806,7 @@ public defn encode (fid:Int, func:VMFunction,
           val code-label = new-label(a)
           val tgts = new-label(a)
           read-dispatch-table(a, tmp3(), vmstate(), CONST(tmp1(), value))
-          cmp(a, tmp3(), CONST(tmp1(), 2)) ; < 2 are targets and >= 2 are methods to goto
+          cmp(a, tmp3(), 2) ; < 2 are targets and >= 2 are methods to goto
           jge(a, code-label)
           lea(a, tmp2(), MemPtr(tgts, 0))
           mov(a, tmp2(), MemPtr(tmp2(), tmp3(), 3, 0))
@@ -1067,7 +1067,7 @@ public defn encode (fid:Int, func:VMFunction,
         JUMP-REG-OPCODE :
           val reg = x
           val arity = y
-          cmp(a, GET-REG(tmp1(), reg), CONST(tmp2(), arity))
+          cmp(a, GET-REG(tmp1(), reg), arity)
           je(a, value as Label)
 
     defn cmp-set (a:Assembler, x:Gp, y:Gp, z:Gp, zb:Gp, set:(Assembler, Gp) -> False) -> Gp :
@@ -1510,14 +1510,14 @@ public defn encode (fid:Int, func:VMFunction,
       switch(opcode) :
         JUMP-TAGBITS-OPCODE :
           val bits = and-op(a, LOCAL!(tmp1(), x), CONST(tmp2(), 0x7))
-          cmp(a, bits, CONST(tmp2(), y))
+          cmp(a, bits, y)
           je(a, n1)
           jmp(a, n2)
         JUMP-TAGWORD-OPCODE :
           val obj = LOCAL(tmp1(), x) ; OBJ
           and-op(a, LOCAL!(tmp2(), x), CONST(tmp3(), 7)) ; TAGBITS
           val tag = LOCAL(tmp3(), y) ; TAG
-          cmp(a, tmp2(), CONST(rax(), 1)) ; tagbits == 1
+          cmp(a, tmp2(), 1) ; tagbits == 1
           jne(a, n2)
           mov(a, tmp1(), MemPtr(obj, -1, SIZEOF-INT)) ; *p = *((int*)(obj - 1))
           jump-op-reg(tmp1(), tag, je, cmp, n1, n2)   ; *p == tag

@@ -196,8 +196,11 @@ void assembler_mov_ptr_gp(Assembler *a, const MemPtr* mem, Gp *reg) {
 void assembler_lea_ptr(Assembler *a, const Gp *reg, MemPtr *mem) {
   a->lea(*reg, mem->value);
 }
-void assembler_cmp(Assembler *a, const Gp *x, const Gp *y) {
+void assembler_cmp_reg(Assembler *a, const Gp *x, const Gp *y) {
   a->cmp(*x, *y);
+}
+void assembler_cmp_int(Assembler *a, const Gp *x, int y) {
+  a->cmp(*x, y);
 }
 void assembler_set_e(Assembler *a, const Gp *x) {
   a->sete(*x);

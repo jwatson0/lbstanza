@@ -1,6 +1,8 @@
 defpackage stz/asmjit :
   import core
 
+;ASMJIT -- STANZA INTERFACE
+
 extern printf: (ptr<byte>, ? ...) -> int
 
 extern jit_runtime_new: () -> ptr<?>
@@ -92,7 +94,8 @@ extern assembler_maxsd: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_sqrtss: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_sqrtsd: (ptr<?>, ptr<?>, ptr<?>) -> int
 
-extern assembler_cmp: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_cmp_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_cmp_int: (ptr<?>, ptr<?>, int) -> int
 extern assembler_ucomiss: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_ucomisd: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_set_e: (ptr<?>, ptr<?>) -> int
@@ -423,6 +426,7 @@ public lostanza defn call (a:ref<Assembler>, f:ref<Gp>) -> ref<False> :
 public lostanza defn ret (a:ref<Assembler>) -> ref<False> :
   call-c assembler_ret(a.value)
   return false
+
 public lostanza defn add (a:ref<Assembler>, reg:ref<Gp>, value:ref<Int>) -> ref<Gp> :
   call-c assembler_add_int(a.value, reg.value, value.value)
   return reg
@@ -507,15 +511,16 @@ public lostanza defn mov (a:ref<Assembler>, dst:ref<Gp>, ptr:ref<MemPtr>) -> ref
 public lostanza defn mov (a:ref<Assembler>, ptr:ref<MemPtr>, reg:ref<Gp>) -> ref<False> :
   call-c assembler_mov_ptr_gp(a.value, ptr.value, reg.value)
   return false
-public lostanza defn call (func:ref<Func>) -> ref<Long> :
-  return new Long{ call-c func_call(func.value) }
-public lostanza defn call (func:ref<Func>, arg:ptr<?>) -> ref<Long> :
-  return new Long{ call-c func_call1(func.value, arg as long) }
+
 public lostanza defn lea (a:ref<Assembler>, reg:ref<Gp>, ptr:ref<MemPtr>) -> ref<False> :
   call-c assembler_lea_ptr(a.value, reg.value, ptr.value)
   return false
+
 public lostanza defn cmp (a:ref<Assembler>, x:ref<Gp>, y:ref<Gp>) -> ref<False> :
-  call-c assembler_cmp(a.value, x.value, y.value)
+  call-c assembler_cmp_reg(a.value, x.value, y.value)
+  return false
+public lostanza defn cmp (a:ref<Assembler>, x:ref<Gp>, y:ref<Int>) -> ref<False> :
+  call-c assembler_cmp_int(a.value, x.value, y.value)
   return false
 
 public lostanza defn set-e (a:ref<Assembler>, x:ref<Gp>) -> ref<False> :
@@ -691,12 +696,17 @@ public lostanza defn sqrtss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> re
 public lostanza defn sqrtsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<Xmm> :
   call-c assembler_sqrtsd(a.value, dst.value, src.value)
   return dst
-public lostanza defn ucomiss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
-  call-c assembler_ucomiss(a.value, dst.value, src.value)
+public lostanza defn ucomiss (a:ref<Assembler>, x:ref<Xmm>, y:ref<Xmm>) -> ref<False> :
+  call-c assembler_ucomiss(a.value, x.value, y.value)
   return false
-public lostanza defn ucomisd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<False> :
-  call-c assembler_ucomisd(a.value, dst.value, src.value)
+public lostanza defn ucomisd (a:ref<Assembler>, x:ref<Xmm>, y:ref<Xmm>) -> ref<False> :
+  call-c assembler_ucomisd(a.value, x.value, y.value)
   return false
+
+public lostanza defn call (func:ref<Func>) -> ref<Long> :
+  return new Long{ call-c func_call(func.value) }
+public lostanza defn call (func:ref<Func>, arg:ptr<?>) -> ref<Long> :
+  return new Long{ call-c func_call1(func.value, arg as long) }
 
 public lostanza defn embed (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
   call-c assembler_embed_label(a.value, lab.value)
