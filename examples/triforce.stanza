@@ -40,17 +40,14 @@ defn display (xs:Seqable<(() -> False)>) :
       x()
       print('\n')
 
-;Triforce shape.
-defn triforce (n:Int) :
-   val top = pad(triangle(n), n, n)
-   val bottom = beside(triangle(n), pad(triangle(n), 1, 0))
-   cat(top, bottom)
-
-;Big triforce shape.
-defn big-triforce (n:Int) :
-   val top = pad(triforce(n), n * 2, n * 2)
-   val bottom = beside(triforce(n), pad(triforce(n), 1, 0))
-   cat(top, bottom)   
+defn triforce (m:Int, n:Int) :
+  if m <= 1 :
+   triangle(n)
+  else :
+    val amount = n * (1 << (m - 2))
+    val top = pad(triforce(m - 1, n), amount, amount)
+    val bottom = beside(triforce(m - 1, n), pad(triforce(m - 1, n), 1, 0))
+    cat(top, bottom)
 
 ;Draw a big triforce
-display(big-triforce(5))
+display(triforce(6, 3))

@@ -173,10 +173,10 @@ void assembler_mov_reg(Assembler *a, const Gp *dst, const Gp *src) {
   a->mov(*dst, *src);
 }
 void assembler_mov_xmm_reg(Assembler *a, const Xmm *dst, const Gp *src) {
-  a->movd(*dst, *src);
+  a->movq(*dst, *src);
 }
 void assembler_mov_reg_xmm(Assembler *a, const Gp *dst, const Xmm *src) {
-  a->movd(*dst, *src);
+  a->movq(*dst, *src);
 }
 void assembler_mov_int(Assembler *a, const Gp *reg, uint32_t value) {
   a->mov(*reg, uint32_t(value));
@@ -327,6 +327,7 @@ uint64_t func_call(Func f) {
 uint64_t func_call1(Func1 f, uint64_t arg) {
   return f(arg);
 }
+
 const Gp* x86_al(void) {
   return &al;
 }
@@ -345,14 +346,48 @@ const Gp* x86_sil(void) {
 const Gp* x86_dil(void) {
   return &dil;
 }
+const Gp* x86_spl(void) {
+  return &spl;
+}
+const Gp* x86_bpl(void) {
+  return &bpl;
+}
+const Gp* x86_r8b(void) {
+  return &r8b;
+}
+const Gp* x86_r9b(void) {
+  return &r9b;
+}
+const Gp* x86_r10b(void) {
+  return &r10b;
+}
+const Gp* x86_r11b(void) {
+  return &r11b;
+}
+const Gp* x86_r12b(void) {
+  return &r12b;
+}
+const Gp* x86_r13b(void) {
+  return &r13b;
+}
+const Gp* x86_r14b(void) {
+  return &r14b;
+}
+const Gp* x86_r15b(void) {
+  return &r15b;
+}
+
 const Gp* x86_eax(void) {
   return &eax;
 }
-const Gp* x86_rax(void) {
-  return &rax;
+const Gp* x86_ebx(void) {
+  return &ebx;
 }
 const Gp* x86_ecx(void) {
   return &ecx;
+}
+const Gp* x86_edx(void) {
+  return &edx;
 }
 const Gp* x86_esi(void) {
   return &esi;
@@ -360,20 +395,48 @@ const Gp* x86_esi(void) {
 const Gp* x86_edi(void) {
   return &edi;
 }
-const Gp* x86_rcx(void) {
-  return &rcx;
+const Gp* x86_esp(void) {
+  return &esp;
 }
-const Gp* x86_edx(void) {
-  return &edx;
+const Gp* x86_ebp(void) {
+  return &ebp;
 }
-const Gp* x86_rdx(void) {
-  return &rdx;
+const Gp* x86_r8d(void) {
+  return &r8d;
 }
-const Gp* x86_ebx(void) {
-  return &ebx;
+const Gp* x86_r9d(void) {
+  return &r9d;
+}
+const Gp* x86_r10d(void) {
+  return &r10d;
+}
+const Gp* x86_r11d(void) {
+  return &r11d;
+}
+const Gp* x86_r12d(void) {
+  return &r12d;
+}
+const Gp* x86_r13d(void) {
+  return &r13d;
+}
+const Gp* x86_r14d(void) {
+  return &r14d;
+}
+const Gp* x86_r15d(void) {
+  return &r15d;
+}
+
+const Gp* x86_rax(void) {
+  return &rax;
 }
 const Gp* x86_rbx(void) {
   return &rbx;
+}
+const Gp* x86_rcx(void) {
+  return &rcx;
+}
+const Gp* x86_rdx(void) {
+  return &rdx;
 }
 const Gp* x86_rsi(void) {
   return &rsi;
@@ -386,9 +449,6 @@ const Gp* x86_rsp(void) {
 }
 const Gp* x86_rbp(void) {
   return &rbp;
-}
-const Rip* x86_rip(void) {
-  return &rip;
 }
 const Gp* x86_r8(void) {
   return &r8;
@@ -414,30 +474,18 @@ const Gp* x86_r14(void) {
 const Gp* x86_r15(void) {
   return &r15;
 }
-const Gp* x86_r13d(void) {
-  return &r13d;
-}
-const Gp* x86_r14d(void) {
-  return &r14d;
-}
-const Gp* x86_r15d(void) {
-  return &r15d;
-}
-const Gp* x86_r13b(void) {
-  return &r13b;
-}
-const Gp* x86_r14b(void) {
-  return &r14b;
-}
-const Gp* x86_r15b(void) {
-  return &r15b;
-}
+
 const Xmm* x86_xmm0(void) {
   return &xmm0;
 }
 const Xmm* x86_xmm1(void) {
   return &xmm1;
 }
+
+const Rip* x86_rip(void) {
+  return &rip;
+}
+
 const MemPtr* x86_ptr_gp_base_const_offset_size(Gp *base_ptr, int32_t offset, int32_t size) {
   auto base = *base_ptr;
   return new MemPtr(ptr(base, offset, size));

@@ -125,22 +125,45 @@ extern "C" {
     (Label *base, Gp* index, int32_t shift, int32_t offset, int32_t size);
   const MemPtr* x86_ptr_label_base_const_index_size (Label *base, int32_t index, int32_t size);
   const MemPtr* x86_ptr_label_base_index_const_shift_offset_size (Label *base, Gp* index, int32_t shift, int32_t offset, int32_t size);
+
   const Gp* x86_al(void);
   const Gp* x86_bl(void);
   const Gp* x86_cl(void);
   const Gp* x86_dl(void);
   const Gp* x86_sil(void);
   const Gp* x86_dil(void);
+  const Gp* x86_spl(void);
+  const Gp* x86_bpl(void);
+  const Gp* x86_r8b(void);
+  const Gp* x86_r9b(void);
+  const Gp* x86_r10b(void);
+  const Gp* x86_r11b(void);
+  const Gp* x86_r12b(void);
+  const Gp* x86_r13b(void);
+  const Gp* x86_r14b(void);
+  const Gp* x86_r15b(void);
+
   const Gp* x86_eax(void);
-  const Gp* x86_rax(void);
-  const Gp* x86_rcx(void);
-  const Gp* x86_rdx(void);
+  const Gp* x86_ebx(void);
   const Gp* x86_ecx(void);
+  const Gp* x86_edx(void);
   const Gp* x86_esi(void);
   const Gp* x86_edi(void);
-  const Gp* x86_edx(void);
+  const Gp* x86_esp(void);
+  const Gp* x86_ebp(void);
+  const Gp* x86_r8d(void);
+  const Gp* x86_r9d(void);
+  const Gp* x86_r10d(void);
+  const Gp* x86_r11d(void);
+  const Gp* x86_r12d(void);
+  const Gp* x86_r13d(void);
+  const Gp* x86_r14d(void);
+  const Gp* x86_r15d(void);
+
+  const Gp* x86_rax(void);
   const Gp* x86_rbx(void);
-  const Gp* x86_ebx(void);
+  const Gp* x86_rcx(void);
+  const Gp* x86_rdx(void);
   const Gp* x86_rsi(void);
   const Gp* x86_rdi(void);
   const Gp* x86_rsp(void);
@@ -153,12 +176,7 @@ extern "C" {
   const Gp* x86_r13(void);
   const Gp* x86_r14(void);
   const Gp* x86_r15(void);
-  const Gp* x86_r13d(void);
-  const Gp* x86_r14d(void);
-  const Gp* x86_r15d(void);
-  const Gp* x86_r13b(void);
-  const Gp* x86_r14b(void);
-  const Gp* x86_r15b(void);
+
   const Xmm* x86_xmm0(void);
   const Xmm* x86_xmm1(void);
   const Rip* x86_rip(void);
