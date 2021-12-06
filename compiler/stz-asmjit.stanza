@@ -382,6 +382,9 @@ lostanza defmethod run (f:ref<FuncFinalizer>) -> ref<False> :
     call-c jit_runtime_release(f.rt, f.func)
     f.func = (0L as ptr<?>)
   return false
+public lostanza defn release (rt:ref<JitRuntime>, func:ref<Long>) -> ref<False> :
+  call-c jit_runtime_release(rt.value, func.value as ptr<?>)
+  return false
 public lostanza defn release (rt:ref<JitRuntime>, func:ref<Func>) -> ref<False> :
   call-c jit_runtime_release(rt.value, func.value)
   return false
