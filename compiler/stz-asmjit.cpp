@@ -1,5 +1,5 @@
 #include <asmjit/asmjit.h>
-#include "asmjit-lib.h"
+#include "stz-asmjit.h"
 #include <stdio.h>
 
 using namespace asmjit;
@@ -544,23 +544,18 @@ void dump_registers (void) {
 void dump_memory_64 (uint64_t* start, uint64_t n) {
   uint64_t i = 0;
   for (uint64_t* ptr = start; i < n; ptr += 1, i += 1) {
-    printf("%llx: %llx\n", ptr, *ptr);
+    printf("%p: %llx\n", ptr, *ptr);
   }
 }
 void dump_memory_32 (uint32_t* start, uint64_t n) {
   uint64_t i = 0;
   for (uint32_t* ptr = start; i < n; ptr += 1, i += 1) {
-    printf("%llx: %lx\n", ptr, *ptr);
+    printf("%p: %x\n", ptr, *ptr);
   }
 }
 void dump_memory_8 (uint8_t* start, uint64_t n) {
   uint64_t i = 0;
   for (uint8_t* ptr = start; i < n; ptr += 1, i += 1) {
-    printf("%llx: %x\n", ptr, *ptr);
+    printf("%p: %x\n", ptr, *ptr);
   }
-}
-void c_trampoline_stub (uint64_t fptr, uint64_t* registers, uint64_t* returns) {
-  printf("FPTR %llx\n", fptr);
-  printf("REGS %llx\n", registers);
-  printf("RETS %llx\n", returns);
 }

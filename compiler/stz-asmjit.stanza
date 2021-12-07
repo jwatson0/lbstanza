@@ -512,9 +512,9 @@ public lostanza defn mov (a:ref<Assembler>, ptr:ref<MemPtr>, reg:ref<Gp>) -> ref
   call-c assembler_mov_ptr_gp(a.value, ptr.value, reg.value)
   return false
 
-public lostanza defn lea (a:ref<Assembler>, reg:ref<Gp>, ptr:ref<MemPtr>) -> ref<False> :
-  call-c assembler_lea_ptr(a.value, reg.value, ptr.value)
-  return false
+public lostanza defn lea (a:ref<Assembler>, dst:ref<Gp>, ptr:ref<MemPtr>) -> ref<Gp> :
+  call-c assembler_lea_ptr(a.value, dst.value, ptr.value)
+  return dst
 
 public lostanza defn cmp (a:ref<Assembler>, x:ref<Gp>, y:ref<Gp>) -> ref<False> :
   call-c assembler_cmp_reg(a.value, x.value, y.value)

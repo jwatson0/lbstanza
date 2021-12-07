@@ -106,10 +106,10 @@ package stz/el-freevars defined-in "stz-el-freevars.stanza"
 package stz/asmjit defined-in "stz-asmjit.stanza"
 package stz/asmjit requires :
   ccfiles:
-    "{WORKDIR}/build/asmjit-lib.o"
+    "{WORKDIR}/build/stz-asmjit.o"
   ccflags:
     on-platform:
       os-x  : "-lasmjit -lc++"
       linux : "-lasmjit -lstdc++"
-compile file "{WORKDIR}/build/asmjit-lib.o" from "asmjit-lib.cpp" :
-  "g++ -c -O3 {.}/asmjit-lib.cpp --std=c++11 -o {WORKDIR}/build/asmjit-lib.o"
+compile file "{WORKDIR}/build/stz-asmjit.o" from "stz-asmjit.cpp" :
+  "g++ -c -O3 {.}/stz-asmjit.cpp --std=c++11 -o {WORKDIR}/build/stz-asmjit.o"

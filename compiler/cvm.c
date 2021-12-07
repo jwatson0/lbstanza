@@ -4,6 +4,7 @@
 #include<sys/types.h>
 #include<stdint.h>
 #include<inttypes.h>
+#include<time.h>
 
 //============================================================
 //=================== OPCODES ================================
@@ -2005,12 +2006,27 @@ int lookup_trie_table (VMState* vms, TrieTable* trie_table){
   }  
 }
 
+long tot_elapsed_time = 0;
+
+void print_dispatch_time () {
+  printf("DISPATCH-TIME %f\n", ((double)tot_elapsed_time) / 1000000.0);
+}
+
+long current_time_us();
+
 int read_dispatch_table (VMState* vms, int format){
+  // long t0 = current_time_us();
   int* trie_table = vms->trie_table[format];
   int table_offset = 0;
   while(1){
     int value = lookup_trie_table(vms, (TrieTable*)(trie_table + table_offset));
-    if(value < 0) return -value - 1;
+    if(value < 0) {
+      // long t1 = current_time_us();
+      // t = clock() - t;
+      // dispatch_time += ((double)t)/CLOCKS_PER_SEC;
+      // tot_elapsed_time += (t1 - t0);
+      return -value - 1;
+    }
     table_offset = value;
   }
 }
