@@ -116,6 +116,7 @@ extern x86_ptr_label_base_index_const_shift_offset_size: (ptr<?>, ptr<?>, long, 
 extern x86_ptr_label_base_const_index_size: (ptr<?>, long, long) -> ptr<?>
 extern func_call: (ptr<?>) -> int
 extern func_call1: (ptr<?>,long) -> int
+extern func_call2: (ptr<?>,long,long) -> int
 
 extern assembler_embed_label: (ptr<?>, ptr<?>) -> int
 
@@ -411,6 +412,8 @@ public lostanza defn call (func:ref<Func>) -> ref<Long> :
   return new Long{ call-c func_call(func.value) }
 public lostanza defn call (func:ref<Func>, arg:ptr<?>) -> ref<Long> :
   return new Long{ call-c func_call1(func.value, arg as long) }
+public lostanza defn call (func:ref<Func>, a0:ptr<?>, a1:ptr<?>) -> ref<Long> :
+  return new Long{ call-c func_call2(func.value, a0 as long, a1 as long) }
 
 ;For use with `within'
 

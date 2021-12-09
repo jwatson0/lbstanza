@@ -19,7 +19,7 @@ defpackage stz/vm-jit :
 val local-regs? = false  ;Use x86 registers for first few vm locals?
 val reg-regs? = false    ;Use x86 registers for first few vm registers?
 val debugging? = false   ;General debugging output?
-val tracing? = true      ;Tracing execution of vm instructions and writes?
+val tracing? = false     ;Tracing execution of vm instructions and writes?
 
 ;Resolver api and structures
 
@@ -470,12 +470,13 @@ defn dump-stack-state (a:Assembler, msg:String) :
 
 ;Entry point for launching JIT session
 
-public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
+public defn make-jit-launch (rt:JitRuntime, vms:Long) -> Func :
   within (code, a) = gen-code(rt) :
     ; Setup JIT registers
     val out? = debugging? ; or tracing?
-    mov(a, tmp1(), c-params()[0]) ;CRSP is first argument
+    mov(a, tmp1(), c-params()[0]) ;CRSP is first C argument
     push(a, tmp1())               ;Pushing CRSP for access from crsp instruction 
+    val init-id = mov(a, tmp3(), c-params()[1]) ;Init ID is second C argument
     mov(a, tmp1(), MemPtr(rsp(), 0))
     mov(a, vmstate(), vms)
     get-registers(a, registers())
@@ -487,7 +488,7 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long, init-id:Int) -> Func :
     set-return(a, tmp2())
     get-heap-top(a, tmp1())
     get-global-mem(a, tmp1())
-    mov(a, tmp1(), MemPtr(functions(), init-id * SIZEOF-LONG))
+    mov(a, tmp1(), MemPtr(functions(), init-id, 3, 0))
     jmp(a, tmp1())
     bind(a, ret-label)
     SAVE-STATE-ONLY(a)
@@ -605,7 +606,7 @@ public defn encode (fid:Int, func:VMFunction,
   val extend-stack-launch-value = value(extend-stack-launch)
   val trace-entry-table = Vector<TraceTableEntry>()
   val f = within (code, a) = gen-code(rt) :
-    println("--- ENCODING %_" % [fid])
+    plop("--- ENCODING %_" % [fid])
 
     defn CONST (x:Gp, id:Int|Long) -> Gp : (mov(a, x, to-long(id)), x)
     defn CONST (id:Int|Long) -> Gp : CONST(tmp1(), id)
@@ -2185,7 +2186,7 @@ public defn encode (fid:Int, func:VMFunction,
 
     encode(func as VMMultifn|VMFunc)
 
-  println("FUNC 0x%_" % [hex(value(f))])
+  plop("FUNC 0x%_" % [hex(value(f))])
   EncodedFunction(f, trace-entry-table)
 
 ;============================================================

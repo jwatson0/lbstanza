@@ -330,6 +330,9 @@ uint64_t func_call(Func f) {
 uint64_t func_call1(Func1 f, uint64_t arg) {
   return f(arg);
 }
+uint64_t func_call2(Func2 f, uint64_t a0, uint64_t a1) {
+  return f(a0, a1);
+}
 
 const Gp* x86_al(void) {
   return &al;

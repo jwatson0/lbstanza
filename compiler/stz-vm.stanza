@@ -264,6 +264,7 @@ public lostanza deftype VirtualMachine :
   vmstate: ptr<VMState>
   var core-loaded?: ref<True|False>
   jit-runtime: ref<JitRuntime>
+  var jit-launcher: ref<Func>
 
 public lostanza deftype VMState :
   ;Permanent State
@@ -342,6 +343,13 @@ lostanza defn backend (vm:ref<VirtualMachine>) -> ref<Backend> :
 lostanza defn jit-runtime (vm:ref<VirtualMachine>) -> ref<JitRuntime> :
   return vm.jit-runtime
 
+lostanza defn jit-launcher (vm:ref<VirtualMachine>) -> ref<Func> :
+  return vm.jit-launcher
+
+lostanza defn set-jit-launcher (vm:ref<VirtualMachine>, f:ref<Func>) -> ref<False> :
+  vm.jit-launcher = f
+  return false
+
 lostanza defn update-vmstate (vm:ref<VirtualMachine>) -> ref<False> :
   val vms = vm.vmstate
   val vmt = vm.vmtable
@@ -385,7 +393,9 @@ public lostanza defn VirtualMachine (backend:ref<Backend>) -> ref<VirtualMachine
   val branch-table = BranchTable(class-table)
   val vmtable = VMTable(class-table, branch-table)
   val linker = Linker(branch-table)
-  val vm = new VirtualMachine{backend, vmtable, VMIds(), linker, vmstate, false, jit-runtime-new()}
+  val rt = jit-runtime-new()
+  val launcher = make-jit-launch(rt, new Long{vmstate as long})
+  val vm = new VirtualMachine{backend, vmtable, VMIds(), linker, vmstate, false, rt, launcher}
   update-vmstate(vm)
   return vm
 
@@ -457,8 +467,8 @@ public lostanza defn run-bytecode (vm:ref<VirtualMachine>, start-func:ref<Int>) 
   set-starting-func(vm, start-func)
   ; call-c vmloop(vm.vmstate, call-prim crsp() as long)
   val vms = new Long{vm.vmstate as long}
-  val func = make-jit-launch(jit-runtime(vm), vms, start-func)
-  val res = call(func, call-prim crsp())
+  val func = jit-launcher(vm)
+  val res = call(func, call-prim crsp(), start-func.value as long as ptr<?>)
   null-stack-pointer(vm)
   VIRTUAL-MACHINE = false
   return res
@@ -479,7 +489,10 @@ public lostanza defn call-extern (extern-index:int) -> int :
     sp.return = -1
   ;Set starting function and execute
   set-starting-func(vm, fid)
-  call-c vmloop(vm.vmstate, call-prim crsp() as long)
+  val vms = new Long{vm.vmstate as long}
+  val func = jit-launcher(vm)
+  val res = call(func, call-prim crsp(), fid.value as long as ptr<?>)
+  ; call-c vmloop(vm.vmstate, call-prim crsp() as long)
   ;Restore the returnpc and return
   let :
     val stk:ptr<Stack> = untag(vm.vmstate.current-stack)
