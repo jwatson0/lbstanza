@@ -185,7 +185,6 @@ extern "C" {
   void dump_memory_64 (uint64_t* start, uint64_t n);
   void dump_memory_32 (uint32_t* start, uint64_t n);
   void dump_memory_8 (uint8_t* start, uint64_t n);
-  void c_trampoline_stub (uint64_t fptr, uint64_t* registers, uint64_t* returns);
 };
 
 #endif

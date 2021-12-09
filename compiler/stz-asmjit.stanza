@@ -175,6 +175,8 @@ extern x86_xmm1: () -> ptr<?>
 
 extern x86_rip: () -> ptr<?>
 
+;Wrappers
+
 public lostanza deftype JitRuntime :
   value: ptr<?>
 public lostanza deftype CodeHolder :
@@ -220,6 +222,8 @@ lostanza defn next-id (a:ref<Assembler>) -> ref<Int> :
 public lostanza defn value (f:ref<Func>) -> ref<Long> :
   return new Long{f.value as long}
 
+;Memory addressing modes
+
 public lostanza defn MemPtr (base-ptr:ref<Gp>, offset:ref<Int>, size:ref<Int>) -> ref<MemPtr> :
   val p = call-c x86_ptr_gp_base_const_offset_size(base-ptr.value, offset.value, size.value)
   return new MemPtr{p}
@@ -250,6 +254,8 @@ public defn MemPtr (base-ptr:Label, index:Int) -> MemPtr :
 
 public defn MemPtr (base-ptr:Label) -> MemPtr :
   MemPtr(base-ptr, 0, 8)
+
+;Registers
 
 public lostanza defn al () -> ref<Gp> :
   return new Gp{ call-c x86_al(), 0, 1 }
@@ -366,6 +372,8 @@ public lostanza defn xmm1 () -> ref<Xmm> :
 public lostanza defn rip () -> ref<Rip> :
   return new Rip{ call-c x86_rip() }
 
+;JitRuntime API
+
 public lostanza defn jit-runtime-new () -> ref<JitRuntime> :
   return new JitRuntime{ call-c jit_runtime_new() }
 public lostanza defn delete (rt:ref<JitRuntime>) -> ref<False> :
@@ -373,18 +381,7 @@ public lostanza defn delete (rt:ref<JitRuntime>) -> ref<False> :
   return false
 public lostanza defn add (rt:ref<JitRuntime>, c:ref<CodeHolder>) -> ref<Func> :
   val func = new Func{ call-c jit_runtime_add(rt.value, c.value) }
-  ; call-c printf("CREATING FUNC %p\n", func.value)
-  ; add-finalizer(new FuncFinalizer{rt.value, func.value}, func)
   return func
-lostanza deftype FuncFinalizer <: Finalizer :
-  rt : ptr<?>
-  var func: ptr<?>
-lostanza defmethod run (f:ref<FuncFinalizer>) -> ref<False> :
-  if f.func != (0L as ptr<?>) :
-    ; call-c printf("DELETING FUNC %p\n", f.func)
-    call-c jit_runtime_release(f.rt, f.func)
-    f.func = (0L as ptr<?>)
-  return false
 public lostanza defn release (rt:ref<JitRuntime>, func:ref<Long>) -> ref<False> :
   call-c jit_runtime_release(rt.value, func.value as ptr<?>)
   return false
@@ -396,13 +393,39 @@ public lostanza defn code-holder-new (rt:ref<JitRuntime>) -> ref<CodeHolder> :
 public lostanza defn reset (c:ref<CodeHolder>) -> ref<False> :
   call-c code_holder_reset(c.value)
   return false
+
+;CodeHolder API
+
 public lostanza defn delete (c:ref<CodeHolder>) -> ref<False> :
   call-c code_holder_delete(c.value)
   return false
 public lostanza defn label-offset (c:ref<CodeHolder>, f:ref<Label>) -> ref<Int> :
   return new Int{ call-c code_holder_label_offset(c.value, f.value) }
+
+;Assembler API
+
 public lostanza defn assembler-new (c:ref<CodeHolder>) -> ref<Assembler> :
   return new Assembler{ call-c assembler_new(c.value), 0 }
+
+public lostanza defn call (func:ref<Func>) -> ref<Long> :
+  return new Long{ call-c func_call(func.value) }
+public lostanza defn call (func:ref<Func>, arg:ptr<?>) -> ref<Long> :
+  return new Long{ call-c func_call1(func.value, arg as long) }
+
+;For use with `within'
+
+public defn gen-code (f: (CodeHolder, Assembler) -> ?, rt:JitRuntime) -> Func :
+  val code = code-holder-new(rt)
+  val assembler = assembler-new(code)
+  f(code, assembler)
+  val func = add(rt, code)
+  delete(assembler)
+  reset(code)
+  delete(code)
+  func
+
+;Labels
+
 public lostanza defn new-label (a:ref<Assembler>) -> ref<Label> :
   return new Label{ call-c assembler_new_label(a.value), next-id(a).value }
 public lostanza defn delete (a:ref<Assembler>) -> ref<False> :
@@ -411,6 +434,13 @@ public lostanza defn delete (a:ref<Assembler>) -> ref<False> :
 public lostanza defn bind (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
   call-c assembler_bind(a.value, lab.value)
   return false
+;Put (jmp) label in code stream for jmp tables
+public lostanza defn embed (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
+  call-c assembler_embed_label(a.value, lab.value)
+  return false
+
+;stack, calls, returns
+
 public lostanza defn push (a:ref<Assembler>, reg:ref<Gp>) -> ref<False> :
   call-c assembler_push(a.value, reg.value)
   return false
@@ -426,6 +456,8 @@ public lostanza defn call (a:ref<Assembler>, f:ref<Gp>) -> ref<False> :
 public lostanza defn ret (a:ref<Assembler>) -> ref<False> :
   call-c assembler_ret(a.value)
   return false
+
+;arithmetic
 
 public lostanza defn add (a:ref<Assembler>, reg:ref<Gp>, value:ref<Int>) -> ref<Gp> :
   call-c assembler_add_int(a.value, reg.value, value.value)
@@ -515,6 +547,8 @@ public lostanza defn mov (a:ref<Assembler>, ptr:ref<MemPtr>, reg:ref<Gp>) -> ref
 public lostanza defn lea (a:ref<Assembler>, dst:ref<Gp>, ptr:ref<MemPtr>) -> ref<Gp> :
   call-c assembler_lea_ptr(a.value, dst.value, ptr.value)
   return dst
+
+;comparisons and jumps
 
 public lostanza defn cmp (a:ref<Assembler>, x:ref<Gp>, y:ref<Gp>) -> ref<False> :
   call-c assembler_cmp_reg(a.value, x.value, y.value)
@@ -606,6 +640,8 @@ public lostanza defn jbe (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
   call-c assembler_jbe(a.value, lab.value)
   return false
 
+;moves
+
 public lostanza defn movss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<Xmm> :
   call-c assembler_movss_xmm_xmm(a.value, dst.value, src.value)
   return dst
@@ -636,6 +672,9 @@ public lostanza defn movsd (a:ref<Assembler>, dst:ref<Gp>, src:ref<Xmm>) -> ref<
 public lostanza defn movsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Gp>) -> ref<Xmm> :
   call-c assembler_mov_reg_xmm(a.value, dst.value, src.value)
   return dst
+
+;floating point operations
+
 public lostanza defn cvtsd2ss (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Xmm>) -> ref<Xmm> :
   call-c assembler_cvtsd2ss(a.value, dst.value, src.value)
   return dst
@@ -703,22 +742,3 @@ public lostanza defn ucomisd (a:ref<Assembler>, x:ref<Xmm>, y:ref<Xmm>) -> ref<F
   call-c assembler_ucomisd(a.value, x.value, y.value)
   return false
 
-public lostanza defn call (func:ref<Func>) -> ref<Long> :
-  return new Long{ call-c func_call(func.value) }
-public lostanza defn call (func:ref<Func>, arg:ptr<?>) -> ref<Long> :
-  return new Long{ call-c func_call1(func.value, arg as long) }
-
-public lostanza defn embed (a:ref<Assembler>, lab:ref<Label>) -> ref<False> :
-  call-c assembler_embed_label(a.value, lab.value)
-  return false
-
-public defn gen-code (f: (CodeHolder, Assembler) -> ?, rt:JitRuntime) -> Func :
-  val code = code-holder-new(rt)
-  val assembler = assembler-new(code)
-  f(code, assembler)
-  val func = add(rt, code)
-  delete(assembler)
-  reset(code)
-  delete(code)
-  func
-  
