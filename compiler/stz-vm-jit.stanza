@@ -14,6 +14,18 @@ defpackage stz/vm-jit :
   import stz/asmjit
   import core/stack-trace
 
+;VM-JIT
+;
+;This is a version of stz-vm-encoder.stanza that replaces only the last step of
+;encoding instructions for the VM with AsmJITing those instructions into the x86
+;assembly code that implements the CVM instruction defined in cvm.c
+;In particular it uses exactly the same vmstate structures with
+;the following minor differences:
+;o caches fewer fields in registers to conserve x86 registers
+;o caches first few VM registers and locals in x86 registers
+;o uses ASMJit labels instead of buffer positions
+;o uses ASMJit Funcs for functions instead of buffer positions
+
 ;Configuration
 
 val local-regs? = false  ;Use x86 registers for first few vm locals?
@@ -56,6 +68,7 @@ public defn value (ef:EncodedFunction) -> Long :
 ;C calling convention registers for passing arguments
 defn c-params () : [rdi(), rsi(), rdx(), rcx(), r8(), r9()]
 
+;Bind args in registers onto c calling convention arg registers
 defn bind-parameters (a:Assembler, sargs:Seqable<Gp>) :
   val params = c-params()
   val args   = to-tuple $ sargs
@@ -64,21 +77,20 @@ defn bind-parameters (a:Assembler, sargs:Seqable<Gp>) :
   for (param in params, arg in args) do :
     mov(a, param, arg)
 
-lostanza defn stanza-call (a:ref<Assembler>, faddr:ref<Long>, args:ref<Tuple<Gp>>) -> ref<Gp> :
-  stanza-caller-save-registers(a)
+;Call C function faddr with args saving specd registers
+lostanza defn do-c-call (a:ref<Assembler>, saved-registers:Tuple<Gp>, faddr:ref<Long>, args:ref<Tuple<Gp>>) -> ref<Gp> :
+  save-registers(a, saved-registers)
   bind-parameters(a, args)
   mov(a, tmp1(), faddr)
   call(a, tmp1())
-  stanza-caller-restore-registers(a)
+  restore-registers(a, saved-registers)
   return rax()
 
+lostanza defn stanza-call (a:ref<Assembler>, faddr:ref<Long>, args:ref<Tuple<Gp>>) -> ref<Gp> :
+  return do-c-call(a, stanza-caller-saved-registers, faddr, args)
+
 lostanza defn c-call (a:ref<Assembler>, faddr:ref<Long>, args:ref<Tuple<Gp>>) -> ref<Gp> :
-  c-caller-save-registers(a)
-  bind-parameters(a, args)
-  mov(a, tmp1(), faddr)
-  call(a, tmp1())
-  c-caller-restore-registers(a)
-  return rax()
+  return do-c-call(a, c-caller-saved-registers, faddr, args)
 
 lostanza defn c-trampoline-addr () -> ref<Long> :
   return new Long{addr!(c_trampoline) as long}
@@ -268,12 +280,14 @@ val FUNCTION-SLOTS-OFFSET = next(function-offsets, SIZEOF-LONG)
 
 ;Register map
 
+;Registers to cache VMState and crucial fields
 defn vmstate () :        r8()
 defn registers () :      r9()
 defn stack-pointer () :  r10()
 defn stk () :            r11()
 defn functions () :      r12()
 
+;Temporary registers for implementing and local to VM instructions
 defn tmp1 () :           rbx()
 defn tmp1i () :          ebx()
 defn tmp1b () :          bl()
@@ -286,7 +300,7 @@ defn tmp3b () :          dil()
 
 defn tmp-regs () : [tmp1(), tmp2(), tmp3()]
 
-;x86 register caching of vm locals
+;x86 register caching of VM locals
 
 defn loc1 () :           r13()
 defn loc2 () :           r14()
@@ -295,15 +309,16 @@ defn loc3 () :           r15()
 defn local-regs () : [loc1(), loc2(), loc3()] when local-regs? else []
 defn num-local-regs () : length(local-regs())
 
-;x86 register caching of vm registers
+;x86 register caching of VM registers
 
-var MEM-REG-ONLY?:True|False = false ;dynamic variable that determines whether reg is accessed through memory
+;dynamic variable that determines whether reg is accessed through memory
+var MEM-REG-ONLY?:True|False = false 
 
 defn reg1 () :           rcx()
 defn reg2 () :           rdx()
-; defn reg3 () :           rdx()
+; defn reg3 () :           rax() ;doesn't work because corrupted
 
-defn reg-regs () : [reg1(), reg2()] when reg-regs? else [] ;, reg3()
+defn reg-regs () : [reg1(), reg2()] when reg-regs? else []
 defn num-reg-regs () : length(reg-regs())
 
 ;calling convention registers to save/restore
@@ -344,8 +359,6 @@ val BYTE-TAG-BITS = 3
 val CHAR-TAG-BITS = 4
 val FLOAT-TAG-BITS = 5
 
-val SYSTEM-RETURN-STUB = -2
-
 defn do-BOOLREF (a:Assembler, x:Gp) -> Gp :
   shl(a, x, 3)
   add(a, x, MARKER-TAG-BITS)
@@ -353,6 +366,7 @@ defn do-BOOLREF (a:Assembler, x:Gp) -> Gp :
 
 ;Debugging mechanism
 
+;TODO: should be moved to core.stanza
 defn hex (n:Long) -> String :
   var chars:List<Char> = List()
   let loop (n:Long = n) :
@@ -468,30 +482,29 @@ defn dump-stack-state (a:Assembler, msg:String) :
   dump(a, "STACK-LIMIT:   %p\n", compute-stack-limit(a, rax()))
   ; dump-memory-64(a, stack-pointer(), 6L)
 
-;Entry point for launching JIT session
+;Entry point for launching JIT session from stz-vm.stanza
+;Used for initiated REPL call or stz-extern callback
 
 public defn make-jit-launch (rt:JitRuntime, vms:Long) -> Func :
   within (code, a) = gen-code(rt) :
     ; Setup JIT registers
     val out? = debugging? ; or tracing?
-    mov(a, tmp1(), c-params()[0]) ;CRSP is first C argument
-    push(a, tmp1())               ;Pushing CRSP for access from crsp instruction 
+    mov(a, tmp1(), c-params()[0])  ;CRSP is first C argument
+    push(a, tmp1())                ;Pushing CRSP for access from crsp instruction 
     val init-id = mov(a, tmp3(), c-params()[1]) ;Init ID is second C argument
     mov(a, tmp1(), MemPtr(rsp(), 0))
-    mov(a, vmstate(), vms)
-    get-registers(a, registers())
-    get-functions(a, functions())
-    untag-stack(a, stk(), get-current-stack(a, tmp1()))
-    get-stack-pointer(a, stack-pointer())
+    mov(a, vmstate(), vms)                              ;Cache VMState
+    get-registers(a, registers())                       ;Cache registers
+    get-functions(a, functions())                       ;Cache functions
+    untag-stack(a, stk(), get-current-stack(a, tmp1())) ;Cache stk
+    get-stack-pointer(a, stack-pointer())               ;Cache stack pointer
     val ret-label = new-label(a)
     lea(a, tmp2(), MemPtr(ret-label))
-    set-return(a, tmp2())
-    get-heap-top(a, tmp1())
-    get-global-mem(a, tmp1())
-    mov(a, tmp1(), MemPtr(functions(), init-id, 3, 0))
-    jmp(a, tmp1())
-    bind(a, ret-label)
-    SAVE-STATE-ONLY(a)
+    set-return(a, tmp2())         ;Set return address in current frame
+    mov(a, tmp1(), MemPtr(functions(), init-id, 3, 0)) ;Load initial function
+    jmp(a, tmp1())                ;Launch!
+    bind(a, ret-label)            ;Return address     
+    SAVE-STATE-ONLY(a)            ;save from cache
     pop(a, tmp1())                ;POPPING CRSP
     ret(a)
 
@@ -529,11 +542,13 @@ defn RESTORE-STATE (a:Assembler) :
 defn local-mem-access (l:Int) -> MemPtr :
   MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET)    
 
+;Save x86 register cache to memory vector for VM locals
 defn save-local-registers (a:Assembler) :
   for i in 0 to num-local-regs() do :
     ; dump(a, "SAVING LREG[%d] %p\n", CONST(rax(), i), local-regs()[i])
     mov(a, local-mem-access(i), local-regs()[i])
 
+;Restore x86 register cache from memory vector for VM locals
 defn restore-local-registers (a:Assembler) :
   for i in 0 to num-local-regs() do :
     mov(a, local-regs()[i], local-mem-access(i))
@@ -541,6 +556,7 @@ defn restore-local-registers (a:Assembler) :
 
 ;Stack extension support
 
+;Swap current and system state to allow for execution on system stack etc
 defn swap-current-and-system-state (a:Assembler) :
   get-current-stack(a, tmp1())
   set-current-stack(a, get-system-stack(a, rax()))
@@ -552,6 +568,8 @@ defn swap-current-and-system-state (a:Assembler) :
   get-stack-pointer(a, stack-pointer())
   get-registers(a, registers())
 
+;JIT Trampoline for extending stack called from function when stack overflow is detected
+;in FNENTRY instruction.  Must switch to system state, save state, and then call extend-stack
 public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func) -> Func : 
   within (code, a) = gen-code(rt) :
     val end-label     = tmp2()
@@ -571,6 +589,8 @@ public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func)
     mov(a, tmp2(), MemPtr(functions(), SIZEOF-LONG * EXTEND-STACK-FN))
     jmp(a, tmp2())
 
+;JIT Function for returning from stack extension and returning to FNENTRY VM instruction
+;by switch back to user stack and restoring state
 public defn make-extend-stack-return (rt:JitRuntime) -> Func :
   within (code, a) = gen-code(rt) :
     ;System stack no longer needed
@@ -668,6 +688,7 @@ public defn encode (fid:Int, func:VMFunction,
       dst
     defn GET-REG (dst:Gp, r:Int) -> Gp :
       GET-REG(dst, r, MEM-REG-ONLY?)
+
     defn SET-REG (r:Int, v:Gp, mem-only?:True|False) -> False :
       do-SET-REG(a, r, v, mem-only?)
     defn SET-REG (r:Int, v:Gp) -> False :
@@ -688,6 +709,9 @@ public defn encode (fid:Int, func:VMFunction,
 
     defn local-access (l:Int) -> Gp|MemPtr :
       local-regs()[l] when (l < num-local-regs()) else local-mem-access(l)
+
+    ;Local setters
+    
     defn SET-LOCAL (l:Int, v:Gp) :
       mov(a, local-access(l), v)
       dump(a, "  SET-LOCAL[%d] = %p\n", CONST(rax(), l), v) when (debugging? or tracing?)
@@ -703,6 +727,8 @@ public defn encode (fid:Int, func:VMFunction,
     defn SET-LOCAL-DOUBLE (l:Int, v:Xmm) :
       movsd(a, local-access(l), v)
       dump(a, "SET-LOCAL-DOUBLE[%d] %p\n", CONST(rax(), l), LOCAL(tmp1(), l)) when (debugging? or tracing?)
+
+    ;Local getters
 
     ;Ensure dst register is used (because don't want to corrupt local register)
     defn LOCAL-DST! (dst:Gp, l:Int) -> Gp :
@@ -771,7 +797,7 @@ public defn encode (fid:Int, func:VMFunction,
       do-tcall(f)
       bind(a, end-label)
 
-    ;Opcode tracing support
+    ;Opcode tracing support -- meant to compare against golden models like CVM
     
     defn do-trace-opcode (opcode:Int, name:String) :
       if tracing? :
