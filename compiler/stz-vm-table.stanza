@@ -52,6 +52,9 @@ public lostanza deftype VMTable :
   ;Trace Entries
   trace-table:ref<IntTable<StackTraceEntry>>           
 
+public lostanza defn functions (vmt:ref<VMTable>) -> ref<StableLongArray> :
+  return vmt.functions
+
 ;============================================================
 ;======================= Initialization =====================
 ;============================================================

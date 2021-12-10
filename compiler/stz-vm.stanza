@@ -266,6 +266,20 @@ public lostanza deftype VirtualMachine :
   jit-runtime: ref<JitRuntime>
   var jit-launcher: ref<Func>
 
+defn maybe-delete-old-function (vmt:VMTable, rt:JitRuntime, id:Int) :
+  val funs = functions(vmt)
+  if id < length(funs) :
+    val old-f = funs[id]
+    if old-f != 0L and old-f != -1L :
+      release(rt, old-f)
+      funs[id] = -1L
+
+public defn shutdown (vm:VirtualMachine) :
+  val vmt = vmtable(vm)
+  for id in 0 to length(functions(vmt)) do :
+    maybe-delete-old-function(vmt, jit-runtime(vm), id)
+  delete(jit-runtime(vm))
+
 public lostanza deftype VMState :
   ;Permanent State
   ;Changes in-between each code load
@@ -1124,9 +1138,6 @@ lostanza defn print-tag (ref:long) -> int :
     call-c clib/printf("Unrecognized tag bits.\n")
   return 0
 
-lostanza defn functions (vmt:ref<VMTable>) -> ref<StableLongArray> :
-  return vmt.functions
-
 ;============================================================
 ;================= Instruction Encoding =====================
 ;============================================================
@@ -1183,13 +1194,6 @@ defn class-names (cs:Seqable<VMClass>, ids:VMIds) -> Seqable<KeyValue<Int,String
 ;============================================================
 ;====================== Loading =============================
 ;============================================================
-
-lostanza defn maybe-delete-old-function (vmt:ref<VMTable>, rt:ref<JitRuntime>, id:ref<Int>) -> ref<False> :
-  if id.value < length(vmt.functions).value :
-    val old-f = get(vmt.functions, id)
-    if old-f.value != 0L and old-f.value != -1L :
-      release(rt, old-f)
-  return false
 
 public defn load (vm:VirtualMachine, vmps:Collection<VMPackage>, keep-existing-globals?:True|False) :
   if not empty?(to-seq(vmps)) :
