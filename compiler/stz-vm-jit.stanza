@@ -78,19 +78,20 @@ defn bind-parameters (a:Assembler, sargs:Seqable<Gp>) :
     mov(a, param, arg)
 
 ;Call C function faddr with args saving specd registers
-lostanza defn do-c-call (a:ref<Assembler>, saved-registers:Tuple<Gp>, faddr:ref<Long>, args:ref<Tuple<Gp>>) -> ref<Gp> :
-  save-registers(a, saved-registers)
+lostanza defn do-c-call (a:ref<Assembler>, saved-registers:ref<Seqable<Gp>>, faddr:ref<Long>, args:ref<Tuple<Gp>>) -> ref<Gp> :
+  val regs = to-tuple(saved-registers)
+  save-registers(a, regs)
   bind-parameters(a, args)
   mov(a, tmp1(), faddr)
   call(a, tmp1())
-  restore-registers(a, saved-registers)
+  restore-registers(a, regs)
   return rax()
 
-lostanza defn stanza-call (a:ref<Assembler>, faddr:ref<Long>, args:ref<Tuple<Gp>>) -> ref<Gp> :
-  return do-c-call(a, stanza-caller-saved-registers, faddr, args)
+defn stanza-call (a:Assembler, faddr:Long, args:Tuple<Gp>) -> Gp :
+  do-c-call(a, stanza-caller-saved-registers(), faddr, args)
 
-lostanza defn c-call (a:ref<Assembler>, faddr:ref<Long>, args:ref<Tuple<Gp>>) -> ref<Gp> :
-  return do-c-call(a, c-caller-saved-registers, faddr, args)
+defn c-call (a:Assembler, faddr:Long, args:Tuple<Gp>) -> Gp :
+  do-c-call(a, c-caller-saved-registers(), faddr, args)
 
 lostanza defn c-trampoline-addr () -> ref<Long> :
   return new Long{addr!(c_trampoline) as long}
@@ -504,7 +505,8 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long) -> Func :
     mov(a, tmp1(), MemPtr(functions(), init-id, 3, 0)) ;Load initial function
     jmp(a, tmp1())                ;Launch!
     bind(a, ret-label)            ;Return address     
-    SAVE-STATE-ONLY(a)            ;save from cache
+    SAVE-STATE-ONLY(a)            ;Save from cache
+    restore-local-registers(a)    ;Put registers back for return value
     pop(a, tmp1())                ;POPPING CRSP
     ret(a)
 
@@ -522,7 +524,7 @@ defn reg-access (r:Int, mem-only?:True|False) -> Gp|MemPtr :
 ;Set register into registers vector or x86 register if possible with mem-only? override
 defn do-SET-REG (a:Assembler, r:Int, v:Gp, mem-only?:True|False) -> False :
   mov(a, reg-access(r, mem-only?), v)
-  dump(a, "  SET-REG[%d,%d] = %p\n", CONST(a, tmp2(), r), CONST(a, tmp3(), 1 when mem-only? else 0), v) when tracing?
+  dump(a, "  SET-REG[%d,%d] = %p\n", CONST(a, rcx(), r), CONST(a, rax(), 1 when mem-only? else 0), v) when tracing?
   false
 
 ;Save/Restore to VMState
@@ -583,9 +585,9 @@ public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func)
     ;Set arguments
     get-frames(a, stack-pointer())
     set-return(a, CONST(a, tmp1(), value(stack-overflow-return)))
-    do-SET-REG(a, 0, do-BOOLREF(a, CONST(a, tmp1(), 0)), false)
-    do-SET-REG(a, 1, CONST(a, tmp1(), 1), false)
-    do-SET-REG(a, 2, size-required, false)
+    do-SET-REG(a, 0, do-BOOLREF(a, CONST(a, tmp1(), 0)), true)
+    do-SET-REG(a, 1, CONST(a, tmp1(), 1), true)
+    do-SET-REG(a, 2, size-required, true)
     mov(a, tmp2(), MemPtr(functions(), SIZEOF-LONG * EXTEND-STACK-FN))
     jmp(a, tmp2())
 

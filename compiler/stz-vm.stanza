@@ -264,7 +264,9 @@ public lostanza deftype VirtualMachine :
   vmstate: ptr<VMState>
   var core-loaded?: ref<True|False>
   jit-runtime: ref<JitRuntime>
-  var jit-launcher: ref<Func>
+  jit-init-launcher: ref<Func>
+  jit-extend-stack-launcher: ref<Func>
+  jit-extend-stack-returner: ref<Func>
 
 defn maybe-delete-old-function (vmt:VMTable, rt:JitRuntime, id:Int) :
   val funs = functions(vmt)
@@ -276,9 +278,13 @@ defn maybe-delete-old-function (vmt:VMTable, rt:JitRuntime, id:Int) :
 
 public defn shutdown (vm:VirtualMachine) :
   val vmt = vmtable(vm)
+  val rt = jit-runtime(vm)
   for id in 0 to length(functions(vmt)) do :
-    maybe-delete-old-function(vmt, jit-runtime(vm), id)
-  delete(jit-runtime(vm))
+    maybe-delete-old-function(vmt, rt, id)
+  release(rt, jit-init-launcher(vm))
+  release(rt, jit-extend-stack-launcher(vm))
+  release(rt, jit-extend-stack-returner(vm))
+  delete(rt)
 
 public lostanza deftype VMState :
   ;Permanent State
@@ -357,12 +363,14 @@ lostanza defn backend (vm:ref<VirtualMachine>) -> ref<Backend> :
 lostanza defn jit-runtime (vm:ref<VirtualMachine>) -> ref<JitRuntime> :
   return vm.jit-runtime
 
-lostanza defn jit-launcher (vm:ref<VirtualMachine>) -> ref<Func> :
-  return vm.jit-launcher
+lostanza defn jit-init-launcher (vm:ref<VirtualMachine>) -> ref<Func> :
+  return vm.jit-init-launcher
 
-lostanza defn set-jit-launcher (vm:ref<VirtualMachine>, f:ref<Func>) -> ref<False> :
-  vm.jit-launcher = f
-  return false
+lostanza defn jit-extend-stack-launcher (vm:ref<VirtualMachine>) -> ref<Func> :
+  return vm.jit-extend-stack-launcher
+
+lostanza defn jit-extend-stack-returner (vm:ref<VirtualMachine>) -> ref<Func> :
+  return vm.jit-extend-stack-returner
 
 lostanza defn update-vmstate (vm:ref<VirtualMachine>) -> ref<False> :
   val vms = vm.vmstate
@@ -408,8 +416,11 @@ public lostanza defn VirtualMachine (backend:ref<Backend>) -> ref<VirtualMachine
   val vmtable = VMTable(class-table, branch-table)
   val linker = Linker(branch-table)
   val rt = jit-runtime-new()
-  val launcher = make-jit-launch(rt, new Long{vmstate as long})
-  val vm = new VirtualMachine{backend, vmtable, VMIds(), linker, vmstate, false, rt, launcher}
+  val init-launcher = make-jit-launch(rt, new Long{vmstate as long})
+  val extend-stack-returner = make-extend-stack-return(rt)
+  val extend-stack-launcher = make-extend-stack-launch(rt, extend-stack-returner)
+  val vm = new VirtualMachine{backend, vmtable, VMIds(), linker, vmstate, false, rt,
+                              init-launcher, extend-stack-launcher, extend-stack-returner}
   update-vmstate(vm)
   return vm
 
@@ -481,7 +492,7 @@ public lostanza defn run-bytecode (vm:ref<VirtualMachine>, start-func:ref<Int>) 
   set-starting-func(vm, start-func)
   ; call-c vmloop(vm.vmstate, call-prim crsp() as long)
   val vms = new Long{vm.vmstate as long}
-  val func = jit-launcher(vm)
+  val func = jit-init-launcher(vm)
   val res = call(func, call-prim crsp(), start-func.value as long as ptr<?>)
   null-stack-pointer(vm)
   VIRTUAL-MACHINE = false
@@ -504,7 +515,7 @@ public lostanza defn call-extern (extern-index:int) -> int :
   ;Set starting function and execute
   set-starting-func(vm, fid)
   val vms = new Long{vm.vmstate as long}
-  val func = jit-launcher(vm)
+  val func = jit-init-launcher(vm)
   val res = call(func, call-prim crsp(), fid.value as long as ptr<?>)
   ; call-c vmloop(vm.vmstate, call-prim crsp() as long)
   ;Restore the returnpc and return
@@ -1212,11 +1223,9 @@ public defn load (vm:VirtualMachine, vmps:Collection<VMPackage>, keep-existing-g
       load-package-methods(branch-table(vm), name(p), methods(p))
     ;Load functions
     val encoding-resolver = EncodingResolver(vm-ids, branch-table(vm), live-map-table(linker(vm)))
-    val extend-stack-return = make-extend-stack-return(jit-runtime(vm))
-    val extend-stack-launch = make-extend-stack-launch(jit-runtime(vm), extend-stack-return)
     for f in funcs(load-unit) do :
       val ef = encode(id(f), func(f), jit-runtime(vm), encoding-resolver,
-                      extend-stack-launch, extend-stack-return, backend(vm))
+                      jit-extend-stack-launcher(vm), jit-extend-stack-returner(vm), backend(vm))
       maybe-delete-old-function(vmt, jit-runtime(vm), id(f))
       load-function(vmt, id(f), ef)
     val coverage = opcode-coverage()
