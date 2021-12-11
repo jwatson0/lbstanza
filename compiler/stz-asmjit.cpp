@@ -487,6 +487,24 @@ const Xmm* x86_xmm0(void) {
 const Xmm* x86_xmm1(void) {
   return &xmm1;
 }
+const Xmm* x86_xmm2(void) {
+  return &xmm2;
+}
+const Xmm* x86_xmm3(void) {
+  return &xmm3;
+}
+const Xmm* x86_xmm4(void) {
+  return &xmm4;
+}
+const Xmm* x86_xmm5(void) {
+  return &xmm5;
+}
+const Xmm* x86_xmm6(void) {
+  return &xmm6;
+}
+const Xmm* x86_xmm7(void) {
+  return &xmm7;
+}
 
 const Rip* x86_rip(void) {
   return &rip;

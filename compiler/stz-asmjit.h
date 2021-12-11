@@ -182,6 +182,12 @@ extern "C" {
 
   const Xmm* x86_xmm0(void);
   const Xmm* x86_xmm1(void);
+  const Xmm* x86_xmm2(void);
+  const Xmm* x86_xmm3(void);
+  const Xmm* x86_xmm4(void);
+  const Xmm* x86_xmm5(void);
+  const Xmm* x86_xmm6(void);
+  const Xmm* x86_xmm7(void);
   const Rip* x86_rip(void);
   void dump_registers (void);
   void dump_memory_64 (uint64_t* start, uint64_t n);

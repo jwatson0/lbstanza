@@ -173,6 +173,12 @@ extern x86_r15: () -> ptr<?>
 
 extern x86_xmm0: () -> ptr<?>
 extern x86_xmm1: () -> ptr<?>
+extern x86_xmm2: () -> ptr<?>
+extern x86_xmm3: () -> ptr<?>
+extern x86_xmm4: () -> ptr<?>
+extern x86_xmm5: () -> ptr<?>
+extern x86_xmm6: () -> ptr<?>
+extern x86_xmm7: () -> ptr<?>
 
 extern x86_rip: () -> ptr<?>
 
@@ -201,6 +207,11 @@ public lostanza deftype Func <: Unique :
   value: ptr<?>
 public lostanza deftype MemPtr :
   value: ptr<?>
+
+public lostanza defn id (reg:ref<Xmm>) -> ref<Int> :
+  return new Int{reg.id}
+defmethod print (o:OutputStream, reg:Xmm) :
+  print(o, "Xmm%_" % [id(reg)])
 
 public lostanza defn id (reg:ref<Gp>) -> ref<Int> :
   return new Int{reg.id}
@@ -369,6 +380,18 @@ public lostanza defn xmm0 () -> ref<Xmm> :
   return new Xmm{ call-c x86_xmm0(), 0 }
 public lostanza defn xmm1 () -> ref<Xmm> :
   return new Xmm{ call-c x86_xmm1(), 1 }
+public lostanza defn xmm2 () -> ref<Xmm> :
+  return new Xmm{ call-c x86_xmm2(), 2 }
+public lostanza defn xmm3 () -> ref<Xmm> :
+  return new Xmm{ call-c x86_xmm3(), 3 }
+public lostanza defn xmm4 () -> ref<Xmm> :
+  return new Xmm{ call-c x86_xmm4(), 4 }
+public lostanza defn xmm5 () -> ref<Xmm> :
+  return new Xmm{ call-c x86_xmm5(), 5 }
+public lostanza defn xmm6 () -> ref<Xmm> :
+  return new Xmm{ call-c x86_xmm6(), 6 }
+public lostanza defn xmm7 () -> ref<Xmm> :
+  return new Xmm{ call-c x86_xmm7(), 7 }
 
 public lostanza defn rip () -> ref<Rip> :
   return new Rip{ call-c x86_rip() }

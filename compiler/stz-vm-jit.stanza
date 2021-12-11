@@ -32,6 +32,7 @@ val local-regs? = false  ;Use x86 registers for first few vm locals?
 val reg-regs? = false    ;Use x86 registers for first few vm registers?
 val debugging? = false   ;General debugging output?
 val tracing? = false     ;Tracing execution of vm instructions and writes?
+val jit-callc? = true    ;JIT simple callc invocations?
 
 ;Resolver api and structures
 
@@ -67,6 +68,7 @@ public defn value (ef:EncodedFunction) -> Long :
 
 ;C calling convention registers for passing arguments
 defn c-params () : [rdi(), rsi(), rdx(), rcx(), r8(), r9()]
+defn c-float-params () : [xmm0(), xmm1(), xmm2(), xmm3(), xmm4(), xmm5(), xmm6(), xmm7()]
 
 ;Bind args in registers onto c calling convention arg registers
 defn bind-parameters (a:Assembler, sargs:Seqable<Gp>) :
@@ -759,10 +761,10 @@ public defn encode (fid:Int, func:VMFunction,
         (acc:MemPtr) : mov(a, gp32(dst), acc)
     defn LOCAL-INT (dst:Gp, l:Int) : LOCAL-INT(dst, l, false)
     defn LOCAL-INT-DST! (dst:Gp, l:Int) : LOCAL-INT(dst, l, true)
-    defn LOCAL-FLOAT! (dst:Xmm, l:Int) -> Xmm : movss(a, dst, local-access(l))
-    defn LOCAL-FLOAT (dst:Xmm, l:Int) -> Xmm : LOCAL-FLOAT!(dst, l)
-    defn LOCAL-DOUBLE! (dst:Xmm, l:Int) -> Xmm : movsd(a, dst, local-access(l))
-    defn LOCAL-DOUBLE (dst:Xmm, l:Int) -> Xmm : LOCAL-DOUBLE!(dst, l)
+    defn LOCAL-FLOAT-DST! (dst:Xmm, l:Int) -> Xmm : movss(a, dst, local-access(l))
+    defn LOCAL-FLOAT (dst:Xmm, l:Int) -> Xmm : LOCAL-FLOAT-DST!(dst, l)
+    defn LOCAL-DOUBLE-DST! (dst:Xmm, l:Int) -> Xmm : movsd(a, dst, local-access(l))
+    defn LOCAL-DOUBLE (dst:Xmm, l:Int) -> Xmm : LOCAL-DOUBLE-DST!(dst, l)
 
     ;Stack frame ops
 
@@ -781,13 +783,15 @@ public defn encode (fid:Int, func:VMFunction,
 
     ;Call support
 
-    defn c-call (fptr:Long) :
+    defn c-call (fptr:Gp) :
       push(a, r10())
       push(a, r11())
-      mov(a, rax(), fptr)
-      call(a, rax())
+      call(a, fptr)
       pop(a, r11())
       pop(a, r10())
+
+    defn c-call (fptr:Long) :
+      c-call(mov(a, rax(), fptr))
 
     defn do-tcall (f:Gp) :
       mov(a, tmp1(), MemPtr(functions(), f, 3, 0, SIZEOF-LONG))
@@ -1083,6 +1087,20 @@ public defn encode (fid:Int, func:VMFunction,
       RESTORE-STATE(a)
       POP-FRAME(num-locals)
 
+    defn get-function (dst:Gp, id:Gp) -> Gp :
+      mov(a, dst, MemPtr(functions(), id, 3, 0))
+
+    defn get-global (dst:Gp, value:Int) -> Gp :
+      mov(a, tmp2(), MemPtr(global-offsets(rax()), CONST(tmp1(), value), 3, 0))
+      lea(a, dst, MemPtr(global-mem(rax()), tmp2(), 0, 0))
+
+    defn get-data (dst:Gp, value:Int) -> Gp :
+      mov(a, tmp2i(), MemPtr(data-offsets(rax()), CONST(tmp1(), value), 2, 0, SIZEOF-INT))
+      lea(a, dst, MemPtr(data-mem(rax()), tmp2i(), 3, 0))
+
+    defn get-const (dst:Gp, value:Int) -> Gp :
+      mov(a, dst, MemPtr(const-table(rax()), CONST(tmp1(), value), 3, 0))
+
     defn emit-ins-c (opcode:Int, x:Int, value:Int) :
       trace-opcode(opcode, x, value)
       switch(opcode) :
@@ -1112,16 +1130,11 @@ public defn encode (fid:Int, func:VMFunction,
         SET-REG-OPCODE-CODE :
           SET-REG(x, CONST(tmp1(), value))
         SET-REG-OPCODE-GLOBAL :
-          mov(a, tmp2(), MemPtr(global-offsets(rax()), CONST(tmp1(), value), 3, 0))
-          lea(a, tmp1(), MemPtr(global-mem(rax()), tmp2(), 0, 0))
-          SET-REG(x, tmp1())
+          SET-REG(x, get-global(tmp1(), value))
         SET-REG-OPCODE-DATA :
-          mov(a, tmp2i(), MemPtr(data-offsets(rax()), CONST(tmp1(), value), 2, 0, SIZEOF-INT))
-          lea(a, tmp1(), MemPtr(data-mem(rax()), tmp2i(), 3, 0))
-          SET-REG(x, tmp1())
+          SET-REG(x, get-data(tmp1(), value))
         SET-REG-OPCODE-CONST :
-          mov(a, tmp1(), MemPtr(const-table(rax()), CONST(tmp3(), value), 3, 0))
-          SET-REG(x, tmp1())
+          SET-REG(x, get-const(tmp1(), value))
         SET-REG-OPCODE-UNSIGNED :
           SET-REG(x, CONST(tmp1(), value))
         SET-REG-OPCODE-SIGNED :
@@ -1135,16 +1148,11 @@ public defn encode (fid:Int, func:VMFunction,
         SET-OPCODE-CODE :
           SET-LOCAL(x, CONST(tmp1(), value))
         SET-OPCODE-GLOBAL :
-          mov(a, tmp2(), MemPtr(global-offsets(rax()), CONST(tmp1(), value), 3, 0))
-          lea(a, tmp1(), MemPtr(global-mem(rax()), tmp2(), 0, 0))
-          SET-LOCAL(x, tmp1())
+          SET-LOCAL(x, get-global(tmp1(), value))
         SET-OPCODE-DATA :
-          mov(a, tmp2i(), MemPtr(data-offsets(rax()), CONST(tmp1(), value), 2, 0, SIZEOF-INT))
-          lea(a, tmp1(), MemPtr(data-mem(rax()), tmp2i(), 3, 0))
-          SET-LOCAL(x, tmp1())
+          SET-LOCAL(x, get-data(tmp1(), value))
         SET-OPCODE-CONST :
-          mov(a, tmp2(), MemPtr(const-table(rax()), CONST(tmp1(), value), 3, 0))
-          SET-LOCAL(x, tmp2())
+          SET-LOCAL(x, get-const(tmp2(), value))
         else :
           fatal("MISSING C OPCODE %_" % [opcode])
 
@@ -1318,10 +1326,10 @@ public defn encode (fid:Int, func:VMFunction,
           val dst = add(a, LOCAL-DST!(tmp1(), y), LOCAL(tmp2(), value))
           SET-LOCAL(x, dst)
         ADD-OPCODE-FLOAT :
-          val dst = addss(a, LOCAL-FLOAT!(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
+          val dst = addss(a, LOCAL-FLOAT-DST!(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
           SET-LOCAL-FLOAT(x, dst)
         ADD-OPCODE-DOUBLE :
-          val dst = addsd(a, LOCAL-DOUBLE!(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
+          val dst = addsd(a, LOCAL-DOUBLE-DST!(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
           SET-LOCAL-DOUBLE(x, dst)
         SUB-OPCODE-BYTE :
           val dst = sub(a, LOCAL-BYTE-DST!(tmp1b(), y), LOCAL-BYTE(tmp2b(), value))
@@ -1333,10 +1341,10 @@ public defn encode (fid:Int, func:VMFunction,
           val dst = sub(a, LOCAL-DST!(tmp1(), y), LOCAL(tmp2(), value))
           SET-LOCAL(x, dst)
         SUB-OPCODE-FLOAT :
-          val dst = subss(a, LOCAL-FLOAT!(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
+          val dst = subss(a, LOCAL-FLOAT-DST!(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
           SET-LOCAL-FLOAT(x, dst)
         SUB-OPCODE-DOUBLE :
-          val dst = subsd(a, LOCAL-DOUBLE!(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
+          val dst = subsd(a, LOCAL-DOUBLE-DST!(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
           SET-LOCAL-DOUBLE(x, dst)
         MUL-OPCODE-BYTE :
           val dst = imul(a, LOCAL-INT-DST!(tmp1i(), y), LOCAL-INT(tmp2i(), value))
@@ -1348,10 +1356,10 @@ public defn encode (fid:Int, func:VMFunction,
           val dst = imul(a, LOCAL-DST!(tmp3(), y), LOCAL(tmp2(), value))
           SET-LOCAL(x, dst)
         MUL-OPCODE-FLOAT :
-          val dst = mulss(a, LOCAL-FLOAT!(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
+          val dst = mulss(a, LOCAL-FLOAT-DST!(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
           SET-LOCAL-FLOAT(x, dst)
         MUL-OPCODE-DOUBLE :
-          val dst = mulsd(a, LOCAL-DOUBLE!(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
+          val dst = mulsd(a, LOCAL-DOUBLE-DST!(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
           SET-LOCAL-DOUBLE(x, dst)
         DIV-OPCODE-BYTE :
           xor-op(a, rdx(), rdx())
@@ -1369,10 +1377,10 @@ public defn encode (fid:Int, func:VMFunction,
           div(a, LOCAL(tmp2(), value))
           SET-LOCAL(x, rax())
         DIV-OPCODE-FLOAT :
-          val dst = divss(a, LOCAL-FLOAT!(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
+          val dst = divss(a, LOCAL-FLOAT-DST!(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
           SET-LOCAL-FLOAT(x, dst)
         DIV-OPCODE-DOUBLE :
-          val dst = divsd(a, LOCAL-DOUBLE!(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
+          val dst = divsd(a, LOCAL-DOUBLE-DST!(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
           SET-LOCAL-DOUBLE(x, dst)
         MOD-OPCODE-BYTE :
           xor-op(a, rdx(), rdx())
@@ -1877,6 +1885,53 @@ public defn encode (fid:Int, func:VMFunction,
         match(entry:StackTraceEntry) :
           dump(a, ">>> %s\n", CONST(rax(), printf-format(to-string(entry)))) when (debugging? or tracing?)
 
+      defn jit-simple-callc (ins:CallCIns, records:CallCRecords) :
+        ; dump(a, "CALLC %d %d\n", CONST(tmp1(), num-int-args(records)), CONST(tmp2(), num-real-args(records)))
+
+        before-call-dump(trace-entry(ins))
+
+        SAVE-STATE(a)
+
+        ;Move args into x86 registers
+        defn imm-to-reg (dst:Gp, y:VMImm) -> Gp:
+          match(y) :
+            (y:Local) : LOCAL(dst, slot(y))
+            (y:DataId) : get-data(dst, id(y))
+            (y:GlobalId) : get-global(dst, id(y))
+            (y:ConstId) : get-const(dst, id(y))
+            (y) : mov(a, dst, to-bits(y))
+
+        for arg in args(records) do :
+          val v = value(arg) as StdArg|ShadowArg
+          val y = ys(ins)[index(v)]
+          val z = imm-to-reg(loc1(), y)
+          match(loc(arg)) :
+            (loc:RegLoc) :  mov(a, c-params()[index(loc)],       z)
+            (loc:FRegLoc) : mov(a, c-float-params()[index(loc)], z)
+
+        mov(a, rax(), num-real-args(records)) ;Set number of real args
+        
+        val f = match(f(ins)) :
+          (f:Local) :    LOCAL(loc1(), slot(f))
+          (f:ExternId) : CONST(loc1(), to-bits(f) as Long)
+
+        c-call(f)
+
+        RESTORE-STATE(a)
+
+        record-trace-entry(trace-entry(ins))
+
+        ;Move return x86 registers into resulting locals
+
+        if not empty?(xs(ins)) :
+          val x = xs(ins)[0]
+          match(x:Local) :
+            match(return(records)) :
+              (l:RegLoc) :
+                SET-LOCAL(slot(x), rax())         ;TODO: MOVE RAX OUT OF HERE
+              (l:FRegLoc) :
+                SET-LOCAL-DOUBLE(slot(x), xmm0()) ;TODO: MOVE XMM0 OUT OF HERE
+
       ;Encode each instruction
       defn emit-ins (ins:VMIns) :
         match(ins) :
@@ -1917,55 +1972,67 @@ public defn encode (fid:Int, func:VMFunction,
               val ytypes = map(to-arg-type, map(imm-type, ys(ins)))
               val xtypes = map(to-arg-type, map(imm-type, xs(ins)))
               val xtype = IntArg() when empty?(xtypes) else xtypes[0]
-            ;Compute register locations
-            var layout-counter:Int = 0
-            defn next-index (n:Int) :
-              val c = layout-counter
-              layout-counter = layout-counter + n
-              c
-            val num-stack-args-index = next-index(1)
-            val stack-args-index = next-index(num-mem-args(records))
-            val num-float-args-index = next-index(1)
-            val float-args-index = next-index(num-real-args(records))
-            val num-int-args-index = next-index(1)
-            val int-args-index = next-index(num-int-args(records))
-            val num-floats-in-call-index = next-index(1)
-            ;Given the location that the argument should be stored,
-            ;return the index in the register buffer that we should
-            ;store the argument that is desired by the trampoline code.
-            defn register-index (l:CallLoc) -> Int :
-              match(l) :
-                (l:RegLoc) : num-floats-in-call-index - 1 - index(l)
-                (l:FRegLoc) : num-int-args-index - 1 - index(l)
-                (l:MemLoc) : num-float-args-index - 1 - index(l)
-            ;Assign registers
-            for arg in args(records) do :
-              val r = register-index(loc(arg))
-              val v = value(arg) as StdArg|ShadowArg
-              val y = ys(ins)[index(v)]
-              set-mem-reg(r, y)
-            ;Set number of arguments
-            set-mem-reg(num-stack-args-index, NumConst(num-mem-args(records)))
-            set-mem-reg(num-float-args-index, NumConst(num-real-args(records)))
-            set-mem-reg(num-int-args-index, NumConst(num-int-args(records) + 1))
-            set-mem-reg(num-floats-in-call-index, NumConst(num-real-args(records)))
-            ;Call function
-            before-call-dump(trace-entry(ins))
-            match(f(ins)) :
-              (f:Local) :
-                emit-ins-c(CALLC-OPCODE-LOCAL, num-locals, slot(f))
-              (f:ExternId) :
-                val address = to-bits(f) as Long
-                emit-ins-d(CALLC-OPCODE-WIDE, num-locals, address)
-            record-trace-entry(trace-entry(ins))
-            ;Retrieve return registers
-            defn return-register-index (l:CallLoc) :
-              match(l) :
-                (l:RegLoc) : 0
-                (l:FRegLoc) : 1
-            if not empty?(xs(ins)) :
-              val x = xs(ins)[0]
-              get-mem-reg(x, return-register-index(return(records)))
+
+            if jit-callc? and num-mem-args(records) == 0 and f(ins) is-not CodeId : ;TODO: CHECK SHADOW REGS
+
+              ; println("JITTING CALLC %_ %_" % [num-int-args(records), num-real-args(records)])
+              jit-simple-callc(ins, records)
+
+            else : ;general case
+
+              ;Compute register locations
+              var layout-counter:Int = 0
+              defn next-index (n:Int) :
+                val c = layout-counter
+                layout-counter = layout-counter + n
+                c
+              val num-stack-args-index = next-index(1)
+              val stack-args-index = next-index(num-mem-args(records))
+              val num-float-args-index = next-index(1)
+              val float-args-index = next-index(num-real-args(records))
+              val num-int-args-index = next-index(1)
+              val int-args-index = next-index(num-int-args(records))
+              val num-floats-in-call-index = next-index(1)
+              ;Given the location that the argument should be stored,
+              ;return the index in the register buffer that we should
+              ;store the argument that is desired by the trampoline code.
+              defn register-index (l:CallLoc) -> Int :
+                match(l) :
+                  (l:RegLoc) : num-floats-in-call-index - 1 - index(l)
+                  (l:FRegLoc) : num-int-args-index - 1 - index(l)
+                  (l:MemLoc) : num-float-args-index - 1 - index(l)
+              ;Assign registers
+              for arg in args(records) do :
+                val r = register-index(loc(arg))
+                val v = value(arg) as StdArg|ShadowArg
+                val y = ys(ins)[index(v)]
+                set-mem-reg(r, y)
+              ;Set number of arguments
+              set-mem-reg(num-stack-args-index, NumConst(num-mem-args(records)))
+              set-mem-reg(num-float-args-index, NumConst(num-real-args(records)))
+              set-mem-reg(num-int-args-index, NumConst(num-int-args(records) + 1))
+              set-mem-reg(num-floats-in-call-index, NumConst(num-real-args(records)))
+
+              ;Call function
+              before-call-dump(trace-entry(ins))
+              match(f(ins)) :
+                (f:Local) :
+                  emit-ins-c(CALLC-OPCODE-LOCAL, num-locals, slot(f))
+                (f:ExternId) :
+                  val address = to-bits(f) as Long
+                  emit-ins-d(CALLC-OPCODE-WIDE, num-locals, address)
+              record-trace-entry(trace-entry(ins))
+
+              ;Retrieve return registers
+              defn return-register-index (l:CallLoc) :
+                match(l) :
+                  (l:RegLoc) : 0
+                  (l:FRegLoc) : 1
+
+              if not empty?(xs(ins)) :
+                val x = xs(ins)[0]
+                get-mem-reg(x, return-register-index(return(records)))
+
           (ins:YieldIns) :
             set-regs(ys(ins))
             val opcode = ENTER-STACK-OPCODE when enter?(ins) else YIELD-OPCODE
