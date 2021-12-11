@@ -1,0 +1,40 @@
+defpackage stz/zydis :
+  import core
+  import collections
+
+extern zydis_new_decoder: (ptr<byte>, int) -> ptr<?>
+extern zydis_decode: (ptr<?>) -> int
+extern zydis_buffer: (ptr<?>) -> ptr<byte>
+extern zydis_delete: (ptr<?>) -> int
+
+lostanza deftype Decoder :
+  value : ptr<?>
+
+public lostanza defn Decoder (f:ref<Long>, len:ref<Int>) -> ref<Decoder> :
+  val dec = call-c zydis_new_decoder(f.value as ptr<byte>, len.value)
+  return new Decoder{ dec }
+
+lostanza defn decode (dec:ref<Decoder>) -> ref<True|False> :
+  val res = call-c zydis_decode(dec.value)
+  if res == 0 :
+    return false
+  else :
+    return true
+
+lostanza defn buffer (dec:ref<Decoder>) -> ref<String> :
+  val buf = call-c zydis_buffer(dec.value)
+  val res = String(buf)
+  return res
+
+lostanza defn delete (dec:ref<Decoder>) -> ref<False> :
+  call-c zydis_delete(dec.value)
+  return false
+
+public defn disassemble (f:Long, len:Int) :
+  val dec = Decoder(f, len)
+  let loop () :
+    if decode(dec) :
+      println(buffer(dec))
+      loop()
+  delete(dec)      
+

@@ -113,3 +113,13 @@ package stz/asmjit requires :
       linux : "-lasmjit -lstdc++"
 compile file "{WORKDIR}/build/stz-asmjit.o" from "stz-asmjit.cpp" :
   "g++ -c -O3 {.}/stz-asmjit.cpp --std=c++11 -o {WORKDIR}/build/stz-asmjit.o"
+package stz/zydis defined-in "stz-zydis.stanza"
+package stz/zydis requires :
+  ccfiles:
+    "{WORKDIR}/build/stz-zydis.o"
+  ccflags:
+    on-platform:
+      os-x  : "-lzydis -lc++"
+      linux : "-lzydis -lstdc++"
+compile file "{WORKDIR}/build/stz-zydis.o" from "stz-zydis.cpp" :
+  "g++ -c -O3 {.}/stz-zydis.cpp --std=c++11 -o {WORKDIR}/build/stz-zydis.o"

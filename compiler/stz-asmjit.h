@@ -1,5 +1,5 @@
-#ifndef __ASMJIT_LIB__
-#define __ASMJIT_LIB__
+#ifndef __STZ_ASMJIT__
+#define __STZ_ASMJIT__
 
 #include <asmjit/asmjit.h>
 using namespace asmjit;
@@ -17,6 +17,8 @@ extern "C" {
   CodeHolder* code_holder_new(JitRuntime *rt);
   void code_holder_reset(CodeHolder *c);
   void code_holder_delete(CodeHolder *c);
+  void code_holder_flatten(CodeHolder *c);
+  int code_holder_size(CodeHolder *c);
   int code_holder_label_offset(CodeHolder *c, Label *f);
   Assembler* assembler_new(CodeHolder *c);
   void assembler_delete(Assembler *a);

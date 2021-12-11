@@ -1,5 +1,6 @@
 defpackage stz/asmjit :
   import core
+  import stz/zydis
 
 ;ASMJIT -- STANZA INTERFACE
 
@@ -13,6 +14,8 @@ extern code_holder_new: (ptr<?>) -> ptr<?>
 extern code_holder_reset: (ptr<?>) -> int
 extern code_holder_delete: (ptr<?>) -> int
 extern code_holder_label_offset: (ptr<?>, ptr<?>) -> int
+extern code_holder_size: (ptr<?>) -> int
+extern code_holder_flatten: (ptr<?>) -> int
 extern assembler_new: (ptr<?>) -> ptr<?>
 extern assembler_delete: (ptr<?>) -> int
 extern assembler_new_label: (ptr<?>) -> ptr<?>
@@ -207,6 +210,14 @@ public lostanza deftype Func <: Unique :
   value: ptr<?>
 public lostanza deftype MemPtr :
   value: ptr<?>
+
+public lostanza defn flatten (code:ref<CodeHolder>) -> ref<False> :
+  call-c code_holder_flatten(code.value)
+  return false
+
+public lostanza defn size (code:ref<CodeHolder>) -> ref<Int> :
+  val res = call-c code_holder_size(code.value)
+  return new Int{res}
 
 public lostanza defn id (reg:ref<Xmm>) -> ref<Int> :
   return new Int{reg.id}
@@ -444,7 +455,10 @@ public defn gen-code (f: (CodeHolder, Assembler) -> ?, rt:JitRuntime) -> Func :
   val code = code-holder-new(rt)
   val assembler = assembler-new(code)
   f(code, assembler)
+  flatten(code)
+  val len = size(code)
   val func = add(rt, code)
+  disassemble(value(func), len)
   delete(assembler)
   reset(code)
   delete(code)

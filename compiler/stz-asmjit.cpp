@@ -34,6 +34,12 @@ void code_holder_delete(CodeHolder *c) {
 void code_holder_reset(CodeHolder *c) {
   c->reset();
 }
+int code_holder_size(CodeHolder *c) {
+  return c->codeSize();
+}
+void code_holder_flatten(CodeHolder *c) {
+  c->flatten();
+}
 Assembler* assembler_new(CodeHolder *c) {
   return new Assembler(c);
 }

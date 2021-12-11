@@ -630,7 +630,7 @@ public defn encode (fid:Int, func:VMFunction,
   val extend-stack-launch-value = value(extend-stack-launch)
   val trace-entry-table = Vector<TraceTableEntry>()
   val f = within (code, a) = gen-code(rt) :
-    plop("--- ENCODING %_" % [fid])
+    println("--- ENCODING %_" % [fid])
 
     defn CONST (x:Gp, id:Int|Long) -> Gp : (mov(a, x, to-long(id)), x)
     defn CONST (id:Int|Long) -> Gp : CONST(tmp1(), id)
