@@ -842,19 +842,19 @@ public defn encode (fid:Int, func:VMFunction,
       trace-opcode(opcode, value)
       switch(opcode) :
         FNENTRY-OPCODE :
-          val start-label = new-label(a)
-          bind(a, start-label)
-          lea(a, tmp1(), MemPtr(start-label, 0))
+          ; val start-label = new-label(a)
+          ; bind(a, start-label)
+          ; lea(a, tmp1(), MemPtr(start-label, 0))
           val all-good-label = new-label(a)
           val extend-return-label = new-label(a)
           val frame-size = value * SIZEOF-LONG + SIZEOF-STACK-FRAME
           val size-required = frame-size + SIZEOF-STACK-FRAME
           ;Size-required must be in tmp3 to line up for extend-stack-launch
-          add(a, CONST(tmp3(), size-required), stack-pointer())
+          lea(a, tmp3(), MemPtr(stack-pointer(), size-required))
           val limit = stack-limit(tmp2())
           cmp(a, tmp3(), limit)
           jle(a, all-good-label)
-          CONST(tmp3(), size-required)
+          mov(a, tmp3(), size-required)
           lea(a, tmp2(), MemPtr(extend-return-label, 0))
           jmp(a, CONST(tmp1(), extend-stack-launch-value))
           bind(a, extend-return-label)
@@ -1915,7 +1915,7 @@ public defn encode (fid:Int, func:VMFunction,
           (f:Local) :    LOCAL(loc1(), slot(f))
           (f:ExternId) : CONST(loc1(), to-bits(f) as Long)
 
-        c-call(f)
+        call(a, f)
 
         RESTORE-STATE(a)
 
