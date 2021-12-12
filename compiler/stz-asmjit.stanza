@@ -451,14 +451,14 @@ public lostanza defn call (func:ref<Func>, a0:ptr<?>, a1:ptr<?>) -> ref<Long> :
 
 ;For use with `within'
 
-public defn gen-code (f: (CodeHolder, Assembler) -> ?, rt:JitRuntime) -> Func :
+public defn gen-code (f: (CodeHolder, Assembler) -> ?, rt:JitRuntime, disassembling?) -> Func :
   val code = code-holder-new(rt)
   val assembler = assembler-new(code)
   f(code, assembler)
-  flatten(code)
-  val len = size(code)
   val func = add(rt, code)
-  disassemble(value(func), len)
+  if disassembling? :
+    flatten(code)
+    disassemble(value(func), size(code))
   delete(assembler)
   reset(code)
   delete(code)
@@ -707,10 +707,10 @@ public lostanza defn movsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<MemPtr>) -> 
   call-c assembler_movsd_mem_xmm(a.value, dst.value, src.value)
   return dst
 public lostanza defn movsd (a:ref<Assembler>, dst:ref<Gp>, src:ref<Xmm>) -> ref<Gp> :
-  call-c assembler_mov_xmm_reg(a.value, dst.value, src.value)
+  call-c assembler_mov_reg_xmm(a.value, dst.value, src.value)
   return dst
 public lostanza defn movsd (a:ref<Assembler>, dst:ref<Xmm>, src:ref<Gp>) -> ref<Xmm> :
-  call-c assembler_mov_reg_xmm(a.value, dst.value, src.value)
+  call-c assembler_mov_xmm_reg(a.value, dst.value, src.value)
   return dst
 
 ;floating point operations

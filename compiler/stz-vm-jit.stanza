@@ -28,11 +28,12 @@ defpackage stz/vm-jit :
 
 ;Configuration
 
-val local-regs? = false  ;Use x86 registers for first few vm locals?
-val reg-regs? = false    ;Use x86 registers for first few vm registers?
-val debugging? = false   ;General debugging output?
-val tracing? = false     ;Tracing execution of vm instructions and writes?
-val jit-callc? = true    ;JIT simple callc invocations?
+val local-regs? = false    ;Use x86 registers for first few vm locals?
+val reg-regs? = false      ;Use x86 registers for first few vm registers?
+val debugging? = false     ;General debugging output?
+val tracing? = false       ;Tracing execution of vm instructions and writes?
+val jit-callc? = true      ;JIT simple callc invocations?
+val disassembling? = false ;Disassemble JITd code?
 
 ;Resolver api and structures
 
@@ -284,10 +285,10 @@ val FUNCTION-SLOTS-OFFSET = next(function-offsets, SIZEOF-LONG)
 ;Register map
 
 ;Registers to cache VMState and crucial fields
-defn vmstate () :        r8()
+defn stk () :            r8()
 defn registers () :      r9()
 defn stack-pointer () :  r10()
-defn stk () :            r11()
+defn vmstate () :        r11()
 defn functions () :      r12()
 
 ;Temporary registers for implementing and local to VM instructions
@@ -327,7 +328,8 @@ defn num-reg-regs () : length(reg-regs())
 ;calling convention registers to save/restore
 
 defn c-caller-saved-registers () : [r8(), r9(), r10(), r11()]
-defn stanza-caller-saved-registers () : cat([vmstate(), registers(), functions(), stack-pointer(), stk()], local-regs())
+; defn stanza-caller-saved-registers () : cat([vmstate(), registers(), functions(), stack-pointer(), stk()], local-regs())
+defn stanza-caller-saved-registers () : [vmstate(), registers(), functions(), stack-pointer(), stk()]
 defn etc-saved-registers () : stanza-caller-saved-registers()
 defn low-saved-registers () : [rbx(), rcx(), rsi(), rdi() rdx()]
 defn all-saved-registers () : cat(low-saved-registers(), stanza-caller-saved-registers())
@@ -489,7 +491,7 @@ defn dump-stack-state (a:Assembler, msg:String) :
 ;Used for initiated REPL call or stz-extern callback
 
 public defn make-jit-launch (rt:JitRuntime, vms:Long) -> Func :
-  within (code, a) = gen-code(rt) :
+  within (code, a) = gen-code(rt, disassembling?) :
     ; Setup JIT registers
     val out? = debugging? ; or tracing?
     mov(a, tmp1(), c-params()[0])  ;CRSP is first C argument
@@ -575,7 +577,7 @@ defn swap-current-and-system-state (a:Assembler) :
 ;JIT Trampoline for extending stack called from function when stack overflow is detected
 ;in FNENTRY instruction.  Must switch to system state, save state, and then call extend-stack
 public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func) -> Func : 
-  within (code, a) = gen-code(rt) :
+  within (code, a) = gen-code(rt, disassembling?) :
     val end-label     = tmp2()
     val size-required = tmp3()
     ;Save current stack
@@ -596,7 +598,7 @@ public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func)
 ;JIT Function for returning from stack extension and returning to FNENTRY VM instruction
 ;by switch back to user stack and restoring state
 public defn make-extend-stack-return (rt:JitRuntime) -> Func :
-  within (code, a) = gen-code(rt) :
+  within (code, a) = gen-code(rt, disassembling?) :
     ;System stack no longer needed
     set-stack-pointer(a, CONST(a, tmp1(), 0))
     ;Swap stack and registers
@@ -629,8 +631,8 @@ public defn encode (fid:Int, func:VMFunction,
                     backend:Backend) -> EncodedFunction :
   val extend-stack-launch-value = value(extend-stack-launch)
   val trace-entry-table = Vector<TraceTableEntry>()
-  val f = within (code, a) = gen-code(rt) :
-    println("--- ENCODING %_" % [fid])
+  val f = within (code, a) = gen-code(rt, disassembling?) :
+    println("--- ENCODING %_" % [fid]) when (debugging? or disassembling?)
 
     defn CONST (x:Gp, id:Int|Long) -> Gp : (mov(a, x, to-long(id)), x)
     defn CONST (id:Int|Long) -> Gp : CONST(tmp1(), id)
@@ -1090,16 +1092,22 @@ public defn encode (fid:Int, func:VMFunction,
     defn get-function (dst:Gp, id:Gp) -> Gp :
       mov(a, dst, MemPtr(functions(), id, 3, 0))
 
-    defn get-global (dst:Gp, value:Int) -> Gp :
-      mov(a, tmp2(), MemPtr(global-offsets(rax()), CONST(tmp1(), value), 3, 0))
-      lea(a, dst, MemPtr(global-mem(rax()), tmp2(), 0, 0))
+    defn get-global (dst:Gp, tmp1:Gp, tmp2:Gp, value:Int) -> Gp :
+      mov(a, tmp1, MemPtr(global-offsets(tmp2), CONST(tmp1, value), 3, 0))
+      lea(a, dst, MemPtr(global-mem(tmp2), tmp1, 0, 0))
 
-    defn get-data (dst:Gp, value:Int) -> Gp :
-      mov(a, tmp2i(), MemPtr(data-offsets(rax()), CONST(tmp1(), value), 2, 0, SIZEOF-INT))
-      lea(a, dst, MemPtr(data-mem(rax()), tmp2i(), 3, 0))
+    defn get-global (dst:Gp, value:Int) -> Gp : get-global(dst, tmp2(), rax(), value)
 
-    defn get-const (dst:Gp, value:Int) -> Gp :
-      mov(a, dst, MemPtr(const-table(rax()), CONST(tmp1(), value), 3, 0))
+    defn get-data (dst:Gp, tmp1:Gp, tmp2:Gp, value:Int) -> Gp :
+      mov(a, gp32(tmp1), MemPtr(data-offsets(tmp2), CONST(tmp1, value), 2, 0, SIZEOF-INT))
+      lea(a, dst, MemPtr(data-mem(tmp2), gp32(tmp1), 3, 0))
+
+    defn get-data (dst:Gp, value:Int) -> Gp : get-data(dst, tmp2(), rax(), value)
+
+    defn get-const (dst:Gp, tmp1:Gp, tmp2:Gp, value:Int) -> Gp :
+      mov(a, dst, MemPtr(const-table(tmp1), CONST(tmp2, value), 3, 0))
+
+    defn get-const (dst:Gp, value:Int) -> Gp : get-const(dst, rax(), tmp1(), value)
 
     defn emit-ins-c (opcode:Int, x:Int, value:Int) :
       trace-opcode(opcode, x, value)
@@ -1892,22 +1900,25 @@ public defn encode (fid:Int, func:VMFunction,
 
         SAVE-STATE(a)
 
+        ; TEMPORARIES
+        val t1 = rax() ; NOT USED IN ARGS FOR CALLING
+        val t2 = r12() ; HAS FUNCTIONS IN IT WHICH IS NOT USED AND NOT SAVED AND NOT ARG
+        
         ;Move args into x86 registers
-        defn imm-to-reg (dst:Gp, y:VMImm) -> Gp:
+        defn imm-to-reg (dst:Gp, y:VMImm, dst?:True|False) -> Gp:
           match(y) :
-            (y:Local) : LOCAL(dst, slot(y))
-            (y:DataId) : get-data(dst, id(y))
-            (y:GlobalId) : get-global(dst, id(y))
-            (y:ConstId) : get-const(dst, id(y))
+            (y:Local) : LOCAL-DST!(dst, slot(y)) when dst? else LOCAL(dst, slot(y))
+            (y:DataId) : get-data(dst, t1, t2, id(y))
+            (y:GlobalId) : get-global(dst, t1, t2, id(y))
+            (y:ConstId) : get-const(dst, t1, t2, id(y))
             (y) : mov(a, dst, to-bits(y))
 
         for arg in args(records) do :
           val v = value(arg) as StdArg|ShadowArg
           val y = ys(ins)[index(v)]
-          val z = imm-to-reg(loc1(), y)
           match(loc(arg)) :
-            (loc:RegLoc) :  mov(a, c-params()[index(loc)],       z)
-            (loc:FRegLoc) : mov(a, c-float-params()[index(loc)], z)
+            (loc:RegLoc) :  imm-to-reg(c-params()[index(loc)], y, true)
+            (loc:FRegLoc) : mov(a, c-float-params()[index(loc)], imm-to-reg(loc1(), y, false))
 
         mov(a, rax(), num-real-args(records)) ;Set number of real args
         
@@ -1915,7 +1926,9 @@ public defn encode (fid:Int, func:VMFunction,
           (f:Local) :    LOCAL(loc1(), slot(f))
           (f:ExternId) : CONST(loc1(), to-bits(f) as Long)
 
+        PUSH-FRAME-ONLY(num-locals)
         call(a, f)
+        POP-FRAME(num-locals)
 
         RESTORE-STATE(a)
 
