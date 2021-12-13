@@ -451,14 +451,15 @@ public lostanza defn call (func:ref<Func>, a0:ptr<?>, a1:ptr<?>) -> ref<Long> :
 
 ;For use with `within'
 
-public defn gen-code (f: (CodeHolder, Assembler) -> ?, rt:JitRuntime, disassembling?) -> Func :
+public defn gen-code (f: (CodeHolder, Assembler) -> ?, rt:JitRuntime, disassembling?:True|False, out:FileOutputStream) -> Func :
   val code = code-holder-new(rt)
   val assembler = assembler-new(code)
   f(code, assembler)
   val func = add(rt, code)
   if disassembling? :
     flatten(code)
-    disassemble(value(func), size(code))
+    disassemble(value(func), size(code), out)
+    flush(out)
   delete(assembler)
   reset(code)
   delete(code)

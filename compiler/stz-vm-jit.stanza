@@ -26,14 +26,17 @@ defpackage stz/vm-jit :
 ;o uses ASMJit labels instead of buffer positions
 ;o uses ASMJit Funcs for functions instead of buffer positions
 
+public var JIT-LOG-FILE:FileOutputStream = STANDARD-OUTPUT-STREAM as FileOutputStream
+
 ;Configuration
 
-val local-regs? = false    ;Use x86 registers for first few vm locals?
-val reg-regs? = false      ;Use x86 registers for first few vm registers?
-val debugging? = false     ;General debugging output?
-val tracing? = false       ;Tracing execution of vm instructions and writes?
-val jit-callc? = true      ;JIT simple callc invocations?
-val disassembling? = false ;Disassemble JITd code?
+val local-regs? = true       ;Use x86 registers for first few vm locals?
+val reg-regs? = true         ;Use x86 registers for first few vm registers?
+val debugging? = false       ;General debugging output?
+val tracing? = false         ;Tracing execution of vm instructions and writes?
+val jit-callc? = true        ;JIT simple callc invocations?
+val disassembling? = false   ;Disassemble JITd code?
+val dumping-opcodes? = false ;Dumping opcodes within disassembled code
 
 ;Resolver api and structures
 
@@ -491,7 +494,7 @@ defn dump-stack-state (a:Assembler, msg:String) :
 ;Used for initiated REPL call or stz-extern callback
 
 public defn make-jit-launch (rt:JitRuntime, vms:Long) -> Func :
-  within (code, a) = gen-code(rt, disassembling?) :
+  within (code, a) = gen-code(rt, disassembling?, JIT-LOG-FILE) :
     ; Setup JIT registers
     val out? = debugging? ; or tracing?
     mov(a, tmp1(), c-params()[0])  ;CRSP is first C argument
@@ -499,6 +502,8 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long) -> Func :
     val init-id = mov(a, tmp3(), c-params()[1]) ;Init ID is second C argument
     mov(a, tmp1(), MemPtr(rsp(), 0))
     mov(a, vmstate(), vms)                              ;Cache VMState
+    ; mov(a, tmp3(), 0) ;BREAK
+    ; mov(a, MemPtr(tmp3(), 0), tmp3()) ;BREAK
     get-registers(a, registers())                       ;Cache registers
     get-functions(a, functions())                       ;Cache functions
     untag-stack(a, stk(), get-current-stack(a, tmp1())) ;Cache stk
@@ -577,7 +582,7 @@ defn swap-current-and-system-state (a:Assembler) :
 ;JIT Trampoline for extending stack called from function when stack overflow is detected
 ;in FNENTRY instruction.  Must switch to system state, save state, and then call extend-stack
 public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func) -> Func : 
-  within (code, a) = gen-code(rt, disassembling?) :
+  within (code, a) = gen-code(rt, disassembling?, JIT-LOG-FILE) :
     val end-label     = tmp2()
     val size-required = tmp3()
     ;Save current stack
@@ -598,7 +603,7 @@ public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func)
 ;JIT Function for returning from stack extension and returning to FNENTRY VM instruction
 ;by switch back to user stack and restoring state
 public defn make-extend-stack-return (rt:JitRuntime) -> Func :
-  within (code, a) = gen-code(rt, disassembling?) :
+  within (code, a) = gen-code(rt, disassembling?, JIT-LOG-FILE) :
     ;System stack no longer needed
     set-stack-pointer(a, CONST(a, tmp1(), 0))
     ;Swap stack and registers
@@ -631,8 +636,9 @@ public defn encode (fid:Int, func:VMFunction,
                     backend:Backend) -> EncodedFunction :
   val extend-stack-launch-value = value(extend-stack-launch)
   val trace-entry-table = Vector<TraceTableEntry>()
-  val f = within (code, a) = gen-code(rt, disassembling?) :
-    println("--- ENCODING %_" % [fid]) when (debugging? or disassembling?)
+  val f = within (code, a) = gen-code(rt, disassembling?, JIT-LOG-FILE) :
+    println(JIT-LOG-FILE, "--- ENCODING %_" % [fid]) when (dumping-opcodes? or debugging? or disassembling?)
+    dump(a, "--- FID %d\n", CONST(a, loc1(), fid)) when tracing?
 
     defn CONST (x:Gp, id:Int|Long) -> Gp : (mov(a, x, to-long(id)), x)
     defn CONST (id:Int|Long) -> Gp : CONST(tmp1(), id)
@@ -807,41 +813,45 @@ public defn encode (fid:Int, func:VMFunction,
 
     ;Opcode tracing support -- meant to compare against golden models like CVM
     
-    defn do-trace-opcode (opcode:Int, name:String) :
-      if tracing? :
-        val format = string-join $ [ "%d: " opcode-names[opcode] name "\n" ]
-        val counter = rdi()
-        get-instructions(a, counter)
-        dump(a, format, counter) when tracing?
-        add(a, counter, 1)
-        set-instructions(a, counter)
+    defn opcode-string (opcode:Int) -> String :
+      opcode-names[opcode]
+      
+    defn opcode-string (opcode:Int, x:Int|Label) -> String :
+      string-join $ [opcode-string(opcode) " " x]
+
+    defn opcode-string (opcode:Int, x:Int, y:Int|Long) :
+      string-join $ [opcode-string(opcode) " " x " " y]
+
+    defn opcode-string (opcode:Int, x:Int|Label, y:Int, z:Int|Label) :
+      string-join $ [opcode-string(opcode) " " x " " y " " z]
+
+    defn opcode-string (opcode:Int, w:Int, x:Int, y:Int|Label, z:Int|Label) :
+      string-join $ [opcode-string(opcode) " " w " " x " " y " " z]
+
+    defn trace-opcode (opcode:Int, name:String) :
+      val format = string-join $ [ "%d: " name "\n" ]
+      val counter = rdi()
+      get-instructions(a, counter)
+      dump(a, format, counter) when tracing?
+      add(a, counter, 1)
+      set-instructions(a, counter)
       add(covered, opcode)
 
-    defn trace-opcode (opcode:Int) :
-      do-trace-opcode(opcode, "") when tracing?
-
-    defn trace-opcode (opcode:Int, x:Int|Label) :
-      do-trace-opcode(opcode, string-join $ [" " x]) when tracing?
-
-    defn trace-opcode (opcode:Int, x:Int, y:Int|Long) :
-      do-trace-opcode(opcode, string-join $ [" " x " " y]) when tracing?
-
-    defn trace-opcode (opcode:Int, x:Int|Label, y:Int, z:Int|Label) :
-      do-trace-opcode(opcode, string-join $ [" " x " " y " " z]) when tracing?
-
-    defn trace-opcode (opcode:Int, w:Int, x:Int, y:Int|Label, z:Int|Label) :
-      do-trace-opcode(opcode, string-join $ [" " w " " x " " y " " z]) when tracing?
+    defn dump-opcode (name:String) :
+      println(JIT-LOG-FILE, name)
 
     ;Instruction emission
     
     defn emit-ins-a (opcode:Int, value:Label) :
-      trace-opcode(opcode, value)
+      trace-opcode(opcode, opcode-string(opcode, value)) when tracing?
+      dump-opcode(opcode-string(opcode, value)) when dumping-opcodes?
       switch(opcode) :
         GOTO-OPCODE : 
           jmp(a, value as Label)
 
     defn emit-ins-a (opcode:Int, value:Int) :
-      trace-opcode(opcode, value)
+      trace-opcode(opcode, opcode-string(opcode, value)) when tracing?
+      dump-opcode(opcode-string(opcode, value)) when dumping-opcodes?
       switch(opcode) :
         FNENTRY-OPCODE :
           ; val start-label = new-label(a)
@@ -954,7 +964,8 @@ public defn encode (fid:Int, func:VMFunction,
       dst
 
     defn emit-ins-b (opcode:Int, x:Int, value:Int) :
-      trace-opcode(opcode, x, value)
+      trace-opcode(opcode, opcode-string(opcode, x, value)) when tracing?
+      dump-opcode(opcode-string(opcode, x, value)) when dumping-opcodes?
       switch(opcode) :
         INT-NOT-OPCODE :
           not-op(a, LOCAL-DST!(tmp1(), value))
@@ -1110,7 +1121,8 @@ public defn encode (fid:Int, func:VMFunction,
     defn get-const (dst:Gp, value:Int) -> Gp : get-const(dst, rax(), tmp1(), value)
 
     defn emit-ins-c (opcode:Int, x:Int, value:Int) :
-      trace-opcode(opcode, x, value)
+      trace-opcode(opcode, opcode-string(opcode, x, value)) when tracing?
+      dump-opcode(opcode-string(opcode, x, value)) when dumping-opcodes?
       switch(opcode) :
         TCALL-OPCODE-LOCAL :
           do-tcall(LOCAL(tmp2(), value))
@@ -1165,7 +1177,8 @@ public defn encode (fid:Int, func:VMFunction,
           fatal("MISSING C OPCODE %_" % [opcode])
 
     defn emit-ins-c (opcode:Int, x:Label, y:Int, value:Int) :
-      trace-opcode(opcode, x, y, value)
+      trace-opcode(opcode, opcode-string(opcode, x, y, value)) when tracing?
+      dump-opcode(opcode-string(opcode, x, y, value)) when dumping-opcodes?
       defn do-reserve (size:Gp, num-locals:Int) :
         add(a, heap-top(tmp2()), size)
         cmp(a, tmp2(), heap-limit(rax()))
@@ -1188,7 +1201,8 @@ public defn encode (fid:Int, func:VMFunction,
           do-reserve(CONST(tmp3(), value), y)
 
     defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Label) :
-      trace-opcode(opcode, x, y, value)
+      trace-opcode(opcode, opcode-string(opcode, x, y, value)) when tracing?
+      dump-opcode(opcode-string(opcode, x, y, value)) when dumping-opcodes?
       switch(opcode) :
         JUMP-REG-OPCODE :
           val reg = x
@@ -1215,7 +1229,8 @@ public defn encode (fid:Int, func:VMFunction,
       z
 
     defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Int) :
-      trace-opcode(opcode, x, y, value)
+      trace-opcode(opcode, opcode-string(opcode, x, y, value)) when tracing?
+      dump-opcode(opcode-string(opcode, x, y, value)) when dumping-opcodes?
       defn do-alloc (type:Int, num-bytes:Gp) :
         val top = tmp2()
         heap-top(top)
@@ -1552,7 +1567,8 @@ public defn encode (fid:Int, func:VMFunction,
           fatal("MISSING C OPCODE %_" % [opcode])
 
     defn emit-ins-d (opcode:Int, x:Int, value:Long) :
-      trace-opcode(opcode, x, value)
+      trace-opcode(opcode, opcode-string(opcode, x, value)) when tracing?
+      dump-opcode(opcode-string(opcode, x, value)) when dumping-opcodes?
       switch(opcode) :
         CALLC-OPCODE-WIDE : 
           do-callc(x, CONST(tmp1(), value))
@@ -1564,7 +1580,8 @@ public defn encode (fid:Int, func:VMFunction,
           fatal("MISSING D OPCODE %_" % [opcode])
 
     defn emit-ins-e (opcode:Int, x:Int, y:Int, z:Int, value:Int) :
-      trace-opcode(opcode, x, y, z, value)
+      trace-opcode(opcode, opcode-string(opcode, x, y, z, value)) when tracing?
+      dump-opcode(opcode-string(opcode, x, y, z, value)) when dumping-opcodes?
 
       defn store (pi:Int, ov:Int, vi:Int, size:Int) :
         val p = LOCAL(tmp1(), pi)
@@ -1632,7 +1649,8 @@ public defn encode (fid:Int, func:VMFunction,
       jump-op-xmm(LOCAL-DOUBLE(xmm0(), x), LOCAL-DOUBLE(xmm1(), y), f, ucomisd, n1, n2)
 
     defn emit-ins-f (opcode:Int, x:Int, y:Int, n1:Label, n2:Label) :
-      trace-opcode(opcode, x, y, n1, n2)
+      trace-opcode(opcode, opcode-string(opcode, x, y, n1, n2)) when tracing?
+      dump-opcode(opcode-string(opcode, x, y, n1, n2)) when dumping-opcodes?
       switch(opcode) :
         JUMP-TAGBITS-OPCODE :
           val bits = and-op(a, LOCAL-DST!(tmp1(), x), CONST(tmp2(), 0x7))
@@ -1895,43 +1913,48 @@ public defn encode (fid:Int, func:VMFunction,
 
       defn jit-simple-callc (ins:CallCIns, records:CallCRecords) :
         ; dump(a, "CALLC %d %d\n", CONST(tmp1(), num-int-args(records)), CONST(tmp2(), num-real-args(records)))
+        println(JIT-LOG-FILE, "CALLC %_ %_" % [num-int-args(records), num-real-args(records)])
 
         before-call-dump(trace-entry(ins))
-
-        SAVE-STATE(a)
 
         ; TEMPORARIES
         val t1 = rax() ; NOT USED IN ARGS FOR CALLING
         val t2 = r12() ; HAS FUNCTIONS IN IT WHICH IS NOT USED AND NOT SAVED AND NOT ARG
         
+        push(a, t2)
+        
         ;Move args into x86 registers
         defn imm-to-reg (dst:Gp, y:VMImm, dst?:True|False) -> Gp:
           match(y) :
-            (y:Local) : LOCAL-DST!(dst, slot(y)) when dst? else LOCAL(dst, slot(y))
-            (y:DataId) : get-data(dst, t1, t2, id(y))
+            (y:Local) :    LOCAL-DST!(dst, slot(y)) when dst? else LOCAL(dst, slot(y))
+            (y:DataId) :   get-data(dst, t1, t2, id(y))
             (y:GlobalId) : get-global(dst, t1, t2, id(y))
-            (y:ConstId) : get-const(dst, t1, t2, id(y))
-            (y) : mov(a, dst, to-bits(y))
+            (y:ConstId) :  get-const(dst, t1, t2, id(y))
+            (y) :          mov(a, dst, to-bits(y))
 
         for arg in args(records) do :
           val v = value(arg) as StdArg|ShadowArg
           val y = ys(ins)[index(v)]
           match(loc(arg)) :
             (loc:RegLoc) :  imm-to-reg(c-params()[index(loc)], y, true)
-            (loc:FRegLoc) : mov(a, c-float-params()[index(loc)], imm-to-reg(loc1(), y, false))
+            (loc:FRegLoc) : mov(a, c-float-params()[index(loc)], imm-to-reg(rax(), y, false)) ;TODO: NICE TO STORE DIRECTLY IN REG
 
         mov(a, rax(), num-real-args(records)) ;Set number of real args
         
         val f = match(f(ins)) :
-          (f:Local) :    LOCAL(loc1(), slot(f))
-          (f:ExternId) : CONST(loc1(), to-bits(f) as Long)
+          (f:Local) :    LOCAL(t2, slot(f))
+          (f:ExternId) : CONST(t2, to-bits(f) as Long)
 
         PUSH-FRAME-ONLY(num-locals)
+        SAVE-STATE(a)
+
         call(a, f)
-        POP-FRAME(num-locals)
 
         RESTORE-STATE(a)
+        POP-FRAME(num-locals)
 
+        pop(a, t2)
+        
         record-trace-entry(trace-entry(ins))
 
         ;Move return x86 registers into resulting locals
@@ -2294,7 +2317,7 @@ public defn encode (fid:Int, func:VMFunction,
 
     encode(func as VMMultifn|VMFunc)
 
-  plop("FUNC 0x%_" % [hex(value(f))])
+  println(JIT-LOG-FILE, "--> FUNC 0x%_" % [hex(value(f))]) when (dumping-opcodes? or disassembling?)
   EncodedFunction(f, trace-entry-table)
 
 ;============================================================

@@ -285,6 +285,7 @@ public defn shutdown (vm:VirtualMachine) :
   release(rt, jit-extend-stack-launcher(vm))
   release(rt, jit-extend-stack-returner(vm))
   delete(rt)
+  close(JIT-LOG-FILE)
 
 public lostanza deftype VMState :
   ;Permanent State
@@ -390,6 +391,7 @@ lostanza defn update-vmstate (vm:ref<VirtualMachine>) -> ref<False> :
 ;============================================================
 
 public defn VirtualMachine () :
+  JIT-LOG-FILE = FileOutputStream("jit.txt")
   #if-defined(PLATFORM-WINDOWS) :
     VirtualMachine(W64Backend())
   #else :
