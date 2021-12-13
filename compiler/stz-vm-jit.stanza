@@ -1343,7 +1343,7 @@ public defn encode (fid:Int, func:VMFunction,
           val dst = add(a, LOCAL-BYTE-DST!(tmp1b(), y), LOCAL-BYTE(tmp2b(), value))
           SET-LOCAL-BYTE(x, gp64(dst))
         ADD-OPCODE-INT :
-          val dst = add(a, LOCAL-INT(tmp1i(), y), LOCAL-INT(tmp2i(), value))
+          val dst = add(a, LOCAL-INT-DST!(tmp1i(), y), LOCAL-INT(tmp2i(), value))
           SET-LOCAL-INT(x, gp64(dst))
         ADD-OPCODE-LONG :
           val dst = add(a, LOCAL-DST!(tmp1(), y), LOCAL(tmp2(), value))
