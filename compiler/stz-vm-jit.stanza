@@ -35,8 +35,8 @@ val reg-regs? = true         ;Use x86 registers for first few vm registers?
 val debugging? = false       ;General debugging output?
 val tracing? = false         ;Tracing execution of vm instructions and writes?
 val jit-callc? = true        ;JIT simple callc invocations?
-val disassembling? = false   ;Disassemble JITd code?
-val dumping-opcodes? = false ;Dumping opcodes within disassembled code
+val disassembling? = true    ;Disassemble JITd code?
+val dumping-opcodes? = true  ;Dumping opcodes within disassembled code
 
 ;Resolver api and structures
 
@@ -951,7 +951,7 @@ public defn encode (fid:Int, func:VMFunction,
     defn TAG (dst:Gp, x:Gp, tag:Int) -> Gp:
       mov(a, dst, x)
       shl(a, dst, 32)
-      add(a, dst, tag)
+      add(a, dst, tag) when (tag != 0)
       dst
 
     defn DETAG (dst:Gp, x:Gp) -> Gp:
@@ -1104,21 +1104,21 @@ public defn encode (fid:Int, func:VMFunction,
       mov(a, dst, MemPtr(functions(), id, 3, 0))
 
     defn get-global (dst:Gp, tmp1:Gp, tmp2:Gp, value:Int) -> Gp :
-      mov(a, tmp1, MemPtr(global-offsets(tmp2), CONST(tmp1, value), 3, 0))
+      mov(a, tmp1, MemPtr(global-offsets(tmp2), value * SIZEOF-LONG, SIZEOF-LONG))
       lea(a, dst, MemPtr(global-mem(tmp2), tmp1, 0, 0))
 
     defn get-global (dst:Gp, value:Int) -> Gp : get-global(dst, tmp2(), rax(), value)
 
     defn get-data (dst:Gp, tmp1:Gp, tmp2:Gp, value:Int) -> Gp :
-      mov(a, gp32(tmp1), MemPtr(data-offsets(tmp2), CONST(tmp1, value), 2, 0, SIZEOF-INT))
+      mov(a, gp32(tmp1), MemPtr(data-offsets(tmp1), value * SIZEOF-INT, SIZEOF-INT))
       lea(a, dst, MemPtr(data-mem(tmp2), gp32(tmp1), 3, 0))
 
     defn get-data (dst:Gp, value:Int) -> Gp : get-data(dst, tmp2(), rax(), value)
 
-    defn get-const (dst:Gp, tmp1:Gp, tmp2:Gp, value:Int) -> Gp :
-      mov(a, dst, MemPtr(const-table(tmp1), CONST(tmp2, value), 3, 0))
+    defn get-const (dst:Gp, tmp1:Gp, value:Int) -> Gp :
+      mov(a, dst, MemPtr(const-table(tmp1), value * SIZEOF-LONG, SIZEOF-LONG))
 
-    defn get-const (dst:Gp, value:Int) -> Gp : get-const(dst, rax(), tmp1(), value)
+    defn get-const (dst:Gp, value:Int) -> Gp : get-const(dst, rax(), value)
 
     defn emit-ins-c (opcode:Int, x:Int, value:Int) :
       trace-opcode(opcode, opcode-string(opcode, x, value)) when tracing?
@@ -1929,7 +1929,7 @@ public defn encode (fid:Int, func:VMFunction,
             (y:Local) :    LOCAL-DST!(dst, slot(y)) when dst? else LOCAL(dst, slot(y))
             (y:DataId) :   get-data(dst, t1, t2, id(y))
             (y:GlobalId) : get-global(dst, t1, t2, id(y))
-            (y:ConstId) :  get-const(dst, t1, t2, id(y))
+            (y:ConstId) :  get-const(dst, t1, id(y))
             (y) :          mov(a, dst, to-bits(y))
 
         for arg in args(records) do :
