@@ -71,12 +71,12 @@ public defn value (ef:EncodedFunction) -> Long :
 ;Low level calling mechanisms
 
 ;C calling convention registers for passing arguments
-defn c-params () : [rdi(), rsi(), rdx(), rcx(), r8(), r9()]
-defn c-float-params () : [xmm0(), xmm1(), xmm2(), xmm3(), xmm4(), xmm5(), xmm6(), xmm7()]
+val c-params = [rdi, rsi, rdx, rcx, r8, r9]
+val c-float-params = [xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7]
 
 ;Bind args in registers onto c calling convention arg registers
 defn bind-parameters (a:Assembler, sargs:Seqable<Gp>) :
-  val params = c-params()
+  val params = c-params
   val args   = to-tuple $ sargs
   if length(args) > length(params) :
     fatal("Too many arguments for C calling convention registers")
@@ -88,16 +88,16 @@ lostanza defn do-c-call (a:ref<Assembler>, saved-registers:ref<Seqable<Gp>>, fad
   val regs = to-tuple(saved-registers)
   save-registers(a, regs)
   bind-parameters(a, args)
-  mov(a, tmp1(), faddr)
-  call(a, tmp1())
+  mov(a, tmp1, faddr)
+  call(a, tmp1)
   restore-registers(a, regs)
-  return rax()
+  return rax
 
 defn stanza-call (a:Assembler, faddr:Long, args:Tuple<Gp>) -> Gp :
-  do-c-call(a, stanza-caller-saved-registers(), faddr, args)
+  do-c-call(a, stanza-caller-saved-registers, faddr, args)
 
 defn c-call (a:Assembler, faddr:Long, args:Tuple<Gp>) -> Gp :
-  do-c-call(a, c-caller-saved-registers(), faddr, args)
+  do-c-call(a, c-caller-saved-registers, faddr, args)
 
 lostanza defn c-trampoline-addr () -> ref<Long> :
   return new Long{addr!(c_trampoline) as long}
@@ -113,7 +113,7 @@ lostanza defn read-dispatch-table-addr () -> ref<Long> :
 
 defn read-dispatch-table (a:Assembler, dst:Gp, vmstate:Gp, format:Gp) -> Gp :
   c-call(a, read-dispatch-table-addr(), [vmstate, format])
-  mov(a, dst, rax())
+  mov(a, dst, rax)
   dst
 
 extern call_garbage_collector: (ptr<?>, long) -> int
@@ -157,12 +157,12 @@ val SIZEOF-LONG = 8
 ;VMState generic accessors
 
 defn vmstate-get (a:Assembler, offset:Int, dst:Gp) -> Gp :
-  mov(a, dst, MemPtr(vmstate(), offset))
+  mov(a, dst, MemPtr(vmstate, offset))
 defn vmstate-get (a:Assembler, offset:Int) -> Gp :
-  vmstate-get(a, offset, rcx())
+  vmstate-get(a, offset, rcx)
 
 defn vmstate-set (a:Assembler, offset:Int, value:Gp) :
-  mov(a, MemPtr(vmstate(), offset), value)
+  mov(a, MemPtr(vmstate, offset), value)
 
 ;VMState field offsets
 val vmstate-offsets = Counter(0)
@@ -226,13 +226,13 @@ defn set-trie-table (a:Assembler, value:Gp) : vmstate-set(a, VMSTATE-TRIE-TABLE-
 ;Stack Frame accessors
 
 defn stack-frame-get (a:Assembler, offset:Int, dst:Gp) -> Gp :
-  mov(a, dst, MemPtr(stack-pointer(), offset))
+  mov(a, dst, MemPtr(stack-pointer, offset))
   dst
 defn stack-frame-get (a:Assembler, offset:Int) -> Gp :
-  stack-frame-get(a, offset, rcx())
+  stack-frame-get(a, offset, rcx)
 
 defn stack-frame-set (a:Assembler, offset:Int, value:Gp) :
-  mov(a, MemPtr(stack-pointer(), offset), value)
+  mov(a, MemPtr(stack-pointer, offset), value)
 
 val stack-frame-offsets = Counter(0)
 val STACK-FRAME-RETURN-OFFSET = next(stack-frame-offsets, SIZEOF-LONG)
@@ -250,13 +250,13 @@ defn set-liveness-map (a:Assembler, value:Gp) : stack-frame-set(a, STACK-FRAME-L
 ;Stack accessors
 
 defn stack-get (a:Assembler, offset:Int, dst:Gp) -> Gp :
-  mov(a, dst, MemPtr(stk(), offset))
+  mov(a, dst, MemPtr(stk, offset))
   dst
 defn stack-get (a:Assembler, offset:Int) -> Gp :
-  stack-get(a, offset, rcx())
+  stack-get(a, offset, rcx)
 
 defn stack-set (a:Assembler, offset:Int, value:Gp) :
-  mov(a, MemPtr(stk(), offset), value)
+  mov(a, MemPtr(stk, offset), value)
 
 val stack-offsets = Counter(0)
 val STACK-SIZE-OFFSET = next(stack-offsets, SIZEOF-LONG)
@@ -276,7 +276,7 @@ defn set-pc (a:Assembler, value:Gp) : stack-set(a, STACK-PC-OFFSET, value)
 defn untag-stack (a:Assembler, dst:Gp, stk:Gp) -> Gp :
   lea(a, dst, MemPtr(stk, 8 - 1))
 defn untag-stack (a:Assembler, stk:Gp) -> Gp :
-  untag-stack(a, tmp1(), stk)
+  untag-stack(a, tmp1, stk)
 
 ;Function accessors
 
@@ -288,54 +288,54 @@ val FUNCTION-SLOTS-OFFSET = next(function-offsets, SIZEOF-LONG)
 ;Register map
 
 ;Registers to cache VMState and crucial fields
-defn stk () :            r8()
-defn registers () :      r9()
-defn stack-pointer () :  r10()
-defn vmstate () :        r11()
-defn functions () :      r12()
+val stk =            r8
+val registers =      r9
+val stack-pointer =  r10
+val vmstate =        r11
+val functions =      r12
 
 ;Temporary registers for implementing and local to VM instructions
-defn tmp1 () :           rbx()
-defn tmp1i () :          ebx()
-defn tmp1b () :          bl()
-defn tmp2 () :           rsi()
-defn tmp2i () :          esi()
-defn tmp2b () :          sil()
-defn tmp3 () :           rdi()
-defn tmp3i () :          edi()
-defn tmp3b () :          dil()
+val tmp1 =           rbx
+val tmp1i =          ebx
+val tmp1b =          bl
+val tmp2 =           rsi
+val tmp2i =          esi
+val tmp2b =          sil
+val tmp3 =           rdi
+val tmp3i =          edi
+val tmp3b =          dil
 
-defn tmp-regs () : [tmp1(), tmp2(), tmp3()]
+val tmp-regs = [tmp1, tmp2, tmp3]
 
 ;x86 register caching of VM locals
 
-defn loc1 () :           r13()
-defn loc2 () :           r14()
-defn loc3 () :           r15()
+val loc1 =           r13
+val loc2 =           r14
+val loc3 =           r15
 
-defn local-regs () : [loc1(), loc2(), loc3()] when local-regs? else []
-defn num-local-regs () : length(local-regs())
+val local-regs = [loc1, loc2, loc3] when local-regs? else []
+val num-local-regs = length(local-regs)
 
 ;x86 register caching of VM registers
 
 ;dynamic variable that determines whether reg is accessed through memory
 var MEM-REG-ONLY?:True|False = false 
 
-defn reg1 () :           rcx()
-defn reg2 () :           rdx()
-; defn reg3 () :           rax() ;doesn't work because corrupted
+val reg1 =           rcx
+val reg2 =           rdx
+val reg3 =           rax ;doesn't work because corrupted
 
-defn reg-regs () : [reg1(), reg2()] when reg-regs? else []
-defn num-reg-regs () : length(reg-regs())
+val reg-regs = [reg1, reg2] when reg-regs? else []
+val num-reg-regs = length(reg-regs)
 
 ;calling convention registers to save/restore
 
-defn c-caller-saved-registers () : [r8(), r9(), r10(), r11()]
-; defn stanza-caller-saved-registers () : cat([vmstate(), registers(), functions(), stack-pointer(), stk()], local-regs())
-defn stanza-caller-saved-registers () : [vmstate(), registers(), functions(), stack-pointer(), stk()]
-defn etc-saved-registers () : stanza-caller-saved-registers()
-defn low-saved-registers () : [rbx(), rcx(), rsi(), rdi() rdx()]
-defn all-saved-registers () : cat(low-saved-registers(), stanza-caller-saved-registers())
+val c-caller-saved-registers = [r8, r9, r10, r11]
+; defn stanza-caller-saved-registers  : cat([vmstate, registers, functions, stack-pointer, stk], local-regs)
+val stanza-caller-saved-registers  = [vmstate, registers, functions, stack-pointer, stk]
+val etc-saved-registers = stanza-caller-saved-registers
+val low-saved-registers = [rbx, rcx, rsi, rdi rdx]
+val all-saved-registers = to-tuple $ cat(low-saved-registers, stanza-caller-saved-registers)
 
 defn save-registers (a:Assembler, regs:Seqable<Gp>) :
   for reg in regs do : push(a, reg)
@@ -343,20 +343,20 @@ defn save-registers (a:Assembler, regs:Seqable<Gp>) :
 defn restore-registers (a:Assembler, regs:Seqable<Gp>) :
   for reg in reverse $ to-list $ regs do : pop(a, reg)
 
-defn etc-save-registers (a:Assembler) : save-registers(a, etc-saved-registers())
-defn etc-restore-registers (a:Assembler) : restore-registers(a, etc-saved-registers())
+defn etc-save-registers (a:Assembler) : save-registers(a, etc-saved-registers)
+defn etc-restore-registers (a:Assembler) : restore-registers(a, etc-saved-registers)
 
-defn stanza-caller-save-registers (a:Assembler) : save-registers(a, stanza-caller-saved-registers())
-defn stanza-caller-restore-registers (a:Assembler) : restore-registers(a, stanza-caller-saved-registers())
+defn stanza-caller-save-registers (a:Assembler) : save-registers(a, stanza-caller-saved-registers)
+defn stanza-caller-restore-registers (a:Assembler) : restore-registers(a, stanza-caller-saved-registers)
 
-defn c-caller-save-registers (a:Assembler) : save-registers(a, c-caller-saved-registers())
-defn c-caller-restore-registers (a:Assembler) : restore-registers(a, c-caller-saved-registers())
+defn c-caller-save-registers (a:Assembler) : save-registers(a, c-caller-saved-registers)
+defn c-caller-restore-registers (a:Assembler) : restore-registers(a, c-caller-saved-registers)
 
-defn all-save-registers (a:Assembler) : save-registers(a, all-saved-registers())
-defn all-restore-registers (a:Assembler) : restore-registers(a, all-saved-registers())
+defn all-save-registers (a:Assembler) : save-registers(a, all-saved-registers)
+defn all-restore-registers (a:Assembler) : restore-registers(a, all-saved-registers)
 
-defn local-save-registers (a:Assembler) : save-registers(a, local-regs())
-defn local-restore-registers (a:Assembler) : restore-registers(a, local-regs())
+defn local-save-registers (a:Assembler) : save-registers(a, local-regs)
+defn local-restore-registers (a:Assembler) : restore-registers(a, local-regs)
 
 ;Tagging
 
@@ -406,32 +406,32 @@ lostanza defn printf-addr () -> ref<Long> :
 
 defn dump (a:Assembler, format:String, a0:Gp, a1:Gp, a2:Gp, a3:Gp) :
   all-save-registers(a)
-  mov(a, r8(),  printf-format(format))
-  mov(a, r9(),  a0)
-  mov(a, r10(), a1)
-  mov(a, r11(), a2)
-  mov(a, r12(), a3)
-  mov(a, rdi(), r8())
-  mov(a, rsi(), r9())
-  mov(a, rdx(), r10())
-  mov(a, rcx(), r11())
-  mov(a, r8(),  r12())
-  mov(a, rax(), 0L)
-  mov(a, tmp1(), printf-addr())
-  call(a, tmp1())
+  mov(a, r8,  printf-format(format))
+  mov(a, r9,  a0)
+  mov(a, r10, a1)
+  mov(a, r11, a2)
+  mov(a, r12, a3)
+  mov(a, rdi, r8)
+  mov(a, rsi, r9)
+  mov(a, rdx, r10)
+  mov(a, rcx, r11)
+  mov(a, r8,  r12)
+  mov(a, rax, 0L)
+  mov(a, tmp1, printf-addr())
+  call(a, tmp1)
   all-restore-registers(a)
 
-defn dump (a:Assembler, format:String) : dump(a, format, rax(), rax(), rax(), rax())
-defn dump (a:Assembler, format:String, a0:Gp) : dump(a, format, a0, rax(), rax(), rax())
-defn dump (a:Assembler, format:String, a0:Gp, a1:Gp) : dump(a, format, a0, a1, rax(), rax())
-defn dump (a:Assembler, format:String, a0:Gp, a1:Gp, a2:Gp) : dump(a, format, a0, a1, a2, rax())
+defn dump (a:Assembler, format:String) : dump(a, format, rax, rax, rax, rax)
+defn dump (a:Assembler, format:String, a0:Gp) : dump(a, format, a0, rax, rax, rax)
+defn dump (a:Assembler, format:String, a0:Gp, a1:Gp) : dump(a, format, a0, a1, rax, rax)
+defn dump (a:Assembler, format:String, a0:Gp, a1:Gp, a2:Gp) : dump(a, format, a0, a1, a2, rax)
 
 extern dump_registers: () -> int
 
 lostanza defn dump-registers (a:ref<Assembler>) -> ref<False> :
   stanza-caller-save-registers(a)
-  mov(a, tmp1(), new Long{addr!(dump_registers) as long})
-  call(a, tmp1())
+  mov(a, tmp1, new Long{addr!(dump_registers) as long})
+  call(a, tmp1)
   stanza-caller-restore-registers(a)
   return false
 
@@ -452,11 +452,11 @@ lostanza defn dump-memory-64-addr () -> ref<Long> :
 
 lostanza defn dump-memory-x (a:ref<Assembler>, faddr:ref<Long>, start:ref<Gp>, n:ref<Long>) -> ref<False> :
   stanza-caller-save-registers(a)
-  mov(a, rdi(), start)
-  mov(a, rsi(), n)
-  mov(a, rax(), new Long{0L})
-  mov(a, tmp1(), faddr)
-  call(a, tmp1())
+  mov(a, rdi, start)
+  mov(a, rsi, n)
+  mov(a, rax, new Long{0L})
+  mov(a, tmp1, faddr)
+  call(a, tmp1)
   stanza-caller-restore-registers(a)
   return false
 
@@ -475,20 +475,20 @@ defn dump-stack-frame (a:Assembler, sp:Gp) :
 
 defn dump-state (a:Assembler, msg:String) :
   dump(a, msg)
-  dump-memory-64(a, vmstate(), 16L)
-  dump(a, "REGISTERS:     %p\n", registers())
-  dump(a, "STK:           %p\n", stk())
-  dump(a, "STACK-POINTER: %p\n", stack-pointer())
-  ; dump-memory-64(a, stack-pointer(), 6L)
+  dump-memory-64(a, vmstate, 16L)
+  dump(a, "REGISTERS:     %p\n", registers)
+  dump(a, "STK:           %p\n", stk)
+  dump(a, "STACK-POINTER: %p\n", stack-pointer)
+  ; dump-memory-64(a, stack-pointer, 6L)
 
 defn dump-stack-state (a:Assembler, msg:String) :
   dump(a, msg)
-  dump(a, "CURRENT-STACK: %p\n", get-current-stack(a, rax()))
-  dump(a, "SYSTEM-STACK:  %p\n", get-system-stack(a, rax()))
-  dump(a, "STK:           %p\n", stk())
-  dump(a, "STACK-POINTER: %p\n", stack-pointer())
-  dump(a, "STACK-LIMIT:   %p\n", compute-stack-limit(a, rax()))
-  ; dump-memory-64(a, stack-pointer(), 6L)
+  dump(a, "CURRENT-STACK: %p\n", get-current-stack(a, rax))
+  dump(a, "SYSTEM-STACK:  %p\n", get-system-stack(a, rax))
+  dump(a, "STK:           %p\n", stk)
+  dump(a, "STACK-POINTER: %p\n", stack-pointer)
+  dump(a, "STACK-LIMIT:   %p\n", compute-stack-limit(a, rax))
+  ; dump-memory-64(a, stack-pointer, 6L)
 
 ;Entry point for launching JIT session from stz-vm.stanza
 ;Used for initiated REPL call or stz-extern callback
@@ -497,26 +497,26 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long) -> Func :
   within (code, a) = gen-code(rt, disassembling?, JIT-LOG-FILE) :
     ; Setup JIT registers
     val out? = debugging? ; or tracing?
-    mov(a, tmp1(), c-params()[0])  ;CRSP is first C argument
-    push(a, tmp1())                ;Pushing CRSP for access from crsp instruction 
-    val init-id = mov(a, tmp3(), c-params()[1]) ;Init ID is second C argument
-    mov(a, tmp1(), MemPtr(rsp(), 0))
-    mov(a, vmstate(), vms)                              ;Cache VMState
-    ; mov(a, tmp3(), 0) ;BREAK
-    ; mov(a, MemPtr(tmp3(), 0), tmp3()) ;BREAK
-    get-registers(a, registers())                       ;Cache registers
-    get-functions(a, functions())                       ;Cache functions
-    untag-stack(a, stk(), get-current-stack(a, tmp1())) ;Cache stk
-    get-stack-pointer(a, stack-pointer())               ;Cache stack pointer
+    mov(a, tmp1, c-params[0])  ;CRSP is first C argument
+    push(a, tmp1)                ;Pushing CRSP for access from crsp instruction 
+    val init-id = mov(a, tmp3, c-params[1]) ;Init ID is second C argument
+    mov(a, tmp1, MemPtr(rsp, 0))
+    mov(a, vmstate, vms)                              ;Cache VMState
+    ; mov(a, tmp3, 0) ;BREAK
+    ; mov(a, MemPtr(tmp3, 0), tmp3) ;BREAK
+    get-registers(a, registers)                       ;Cache registers
+    get-functions(a, functions)                       ;Cache functions
+    untag-stack(a, stk, get-current-stack(a, tmp1)) ;Cache stk
+    get-stack-pointer(a, stack-pointer)               ;Cache stack pointer
     val ret-label = new-label(a)
-    lea(a, tmp2(), MemPtr(ret-label))
-    set-return(a, tmp2())         ;Set return address in current frame
-    mov(a, tmp1(), MemPtr(functions(), init-id, 3, 0)) ;Load initial function
-    jmp(a, tmp1())                ;Launch!
+    lea(a, tmp2, MemPtr(ret-label))
+    set-return(a, tmp2)         ;Set return address in current frame
+    mov(a, tmp1, MemPtr(functions, init-id, 3, 0)) ;Load initial function
+    jmp(a, tmp1)                ;Launch!
     bind(a, ret-label)            ;Return address     
     SAVE-STATE-ONLY(a)            ;Save from cache
     restore-local-registers(a)    ;Put registers back for return value
-    pop(a, tmp1())                ;POPPING CRSP
+    pop(a, tmp1)                ;POPPING CRSP
     ret(a)
 
 ;Accesses and state saving/restoring
@@ -526,27 +526,27 @@ defn CONST (a:Assembler, x:Gp, id:Int|Long) -> Gp :
 
 ;Addressing for register from registers vector
 defn reg-mem-access (r:Int) -> MemPtr :
-  MemPtr(registers(), r * SIZEOF-LONG)    
+  MemPtr(registers, r * SIZEOF-LONG)    
 ;Access register from registers vector or x86 register if possible with mem-only? override
 defn reg-access (r:Int, mem-only?:True|False) -> Gp|MemPtr :
-  reg-mem-access(r) when (mem-only? or r >= num-reg-regs()) else reg-regs()[r]
+  reg-mem-access(r) when (mem-only? or r >= num-reg-regs) else reg-regs[r]
 ;Set register into registers vector or x86 register if possible with mem-only? override
 defn do-SET-REG (a:Assembler, r:Int, v:Gp, mem-only?:True|False) -> False :
   mov(a, reg-access(r, mem-only?), v)
-  dump(a, "  SET-REG[%d,%d] = %p\n", CONST(a, rcx(), r), CONST(a, rax(), 1 when mem-only? else 0), v) when tracing?
+  dump(a, "  SET-REG[%d,%d] = %p\n", CONST(a, rcx, r), CONST(a, rax, 1 when mem-only? else 0), v) when tracing?
   false
 defn do-SET-REG (a:Assembler, r:Int, v:Gp -> Gp, mem-only?:True|False) -> False :
-  ; val rv = (mov(a, reg-access(r, mem-only?), v(tmp1())), tmp1())
+  ; val rv = (mov(a, reg-access(r, mem-only?), v(tmp1)), tmp1)
   val rv = match(reg-access(r, mem-only?)) :
     (acc:Gp)     : v(acc)
-    (acc:MemPtr) : (mov(a, acc, v(tmp1())), tmp1())
+    (acc:MemPtr) : (mov(a, acc, v(tmp1)), tmp1)
   ; mov(a, reg-access(r, mem-only?), v)
-  dump(a, "  SET-REG[%d,%d] = %p\n", CONST(a, rcx(), r), CONST(a, rax(), 1 when mem-only? else 0), rv) when tracing?
+  dump(a, "  SET-REG[%d,%d] = %p\n", CONST(a, rcx, r), CONST(a, rax, 1 when mem-only? else 0), rv) when tracing?
   false
 
 ;Save/Restore to VMState
 defn SAVE-STATE-ONLY (a:Assembler) :
-  set-stack-pointer(a, stack-pointer())
+  set-stack-pointer(a, stack-pointer)
 
 defn SAVE-STATE (a:Assembler) :
   SAVE-STATE-ONLY(a)
@@ -554,77 +554,77 @@ defn SAVE-STATE (a:Assembler) :
 
 defn RESTORE-STATE (a:Assembler) :
   etc-restore-registers(a)
-  untag-stack(a, stk(), get-current-stack(a, tmp1()))
-  get-stack-pointer(a, stack-pointer())
+  untag-stack(a, stk, get-current-stack(a, tmp1))
+  get-stack-pointer(a, stack-pointer)
 
 ;Addressing for local from locals in stack frame
 defn local-mem-access (l:Int) -> MemPtr :
-  MemPtr(stack-pointer(), l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET)    
+  MemPtr(stack-pointer, l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET)    
 
 ;Save x86 register cache to memory vector for VM locals
 defn save-local-registers (a:Assembler) :
-  for i in 0 to num-local-regs() do :
-    ; dump(a, "SAVING LREG[%d] %p\n", CONST(rax(), i), local-regs()[i])
-    mov(a, local-mem-access(i), local-regs()[i])
+  for i in 0 to num-local-regs do :
+    ; dump(a, "SAVING LREG[%d] %p\n", CONST(rax, i), local-regs[i])
+    mov(a, local-mem-access(i), local-regs[i])
 
 ;Restore x86 register cache from memory vector for VM locals
 defn restore-local-registers (a:Assembler) :
-  for i in 0 to num-local-regs() do :
-    mov(a, local-regs()[i], local-mem-access(i))
-    ; dump(a, "RESTORING LREG[%d] %p\n", CONST(rax(), i), local-regs()[i])
+  for i in 0 to num-local-regs do :
+    mov(a, local-regs[i], local-mem-access(i))
+    ; dump(a, "RESTORING LREG[%d] %p\n", CONST(rax, i), local-regs[i])
 
 ;Stack extension support
 
 ;Swap current and system state to allow for execution on system stack etc
 defn swap-current-and-system-state (a:Assembler) :
-  get-current-stack(a, tmp1())
-  set-current-stack(a, get-system-stack(a, rax()))
-  set-system-stack(a, tmp1())
-  set-registers(a, get-system-registers(a, rax()))
-  set-system-registers(a, registers())
+  get-current-stack(a, tmp1)
+  set-current-stack(a, get-system-stack(a, rax))
+  set-system-stack(a, tmp1)
+  set-registers(a, get-system-registers(a, rax))
+  set-system-registers(a, registers)
   ;Restore stack state
-  untag-stack(a, stk(), get-current-stack(a, tmp1()))
-  get-stack-pointer(a, stack-pointer())
-  get-registers(a, registers())
+  untag-stack(a, stk, get-current-stack(a, tmp1))
+  get-stack-pointer(a, stack-pointer)
+  get-registers(a, registers)
 
 ;JIT Trampoline for extending stack called from function when stack overflow is detected
 ;in FNENTRY instruction.  Must switch to system state, save state, and then call extend-stack
 public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func) -> Func : 
   within (code, a) = gen-code(rt, disassembling?, JIT-LOG-FILE) :
-    val end-label     = tmp2()
-    val size-required = tmp3()
+    val end-label     = tmp2
+    val size-required = tmp3
     ;Save current stack
-    set-stack-pointer(a, stack-pointer())
+    set-stack-pointer(a, stack-pointer)
     set-pc(a, end-label)
     ;Swap stack and registers
     save-local-registers(a)
     swap-current-and-system-state(a)
     ;Set arguments
-    get-frames(a, stack-pointer())
-    set-return(a, CONST(a, tmp1(), value(stack-overflow-return)))
-    do-SET-REG(a, 0, do-BOOLREF(a, CONST(a, tmp1(), 0)), true)
-    do-SET-REG(a, 1, CONST(a, tmp1(), 1), true)
+    get-frames(a, stack-pointer)
+    set-return(a, CONST(a, tmp1, value(stack-overflow-return)))
+    do-SET-REG(a, 0, do-BOOLREF(a, CONST(a, tmp1, 0)), true)
+    do-SET-REG(a, 1, CONST(a, tmp1, 1), true)
     do-SET-REG(a, 2, size-required, true)
-    mov(a, tmp2(), MemPtr(functions(), SIZEOF-LONG * EXTEND-STACK-FN))
-    jmp(a, tmp2())
+    mov(a, tmp2, MemPtr(functions, SIZEOF-LONG * EXTEND-STACK-FN))
+    jmp(a, tmp2)
 
 ;JIT Function for returning from stack extension and returning to FNENTRY VM instruction
 ;by switch back to user stack and restoring state
 public defn make-extend-stack-return (rt:JitRuntime) -> Func :
   within (code, a) = gen-code(rt, disassembling?, JIT-LOG-FILE) :
     ;System stack no longer needed
-    set-stack-pointer(a, CONST(a, tmp1(), 0))
+    set-stack-pointer(a, CONST(a, tmp1, 0))
     ;Swap stack and registers
     swap-current-and-system-state(a)
     restore-local-registers(a)
     ;Continue where we were
-    get-pc(a, tmp2())
-    jmp(a, tmp2())
+    get-pc(a, tmp2)
+    jmp(a, tmp2)
 
 defn compute-stack-limit (a:Assembler, dst:Gp) -> Gp :
   get-frames(a, dst)
-  get-size(a, tmp1())
-  add(a, dst, tmp1())
+  get-size(a, tmp1)
+  add(a, dst, tmp1)
   dst
 
 ;VM Instruction coverage for testing
@@ -646,10 +646,10 @@ public defn encode (fid:Int, func:VMFunction,
   val trace-entry-table = Vector<TraceTableEntry>()
   val f = within (code, a) = gen-code(rt, disassembling?, JIT-LOG-FILE) :
     println(JIT-LOG-FILE, "--- ENCODING %_" % [fid]) when (dumping-opcodes? or debugging? or disassembling?)
-    dump(a, "--- FID %d\n", CONST(a, loc1(), fid)) when tracing?
+    dump(a, "--- FID %d\n", CONST(a, loc1, fid)) when tracing?
 
     defn CONST (x:Gp, id:Int|Long) -> Gp : (mov(a, x, to-long(id)), x)
-    defn CONST (id:Int|Long) -> Gp : CONST(tmp1(), id)
+    defn CONST (id:Int|Long) -> Gp : CONST(tmp1, id)
     defn BOOLREF (x:Gp) -> Gp : do-BOOLREF(a, x)
 
     defn stack-limit (dst:Gp) :    compute-stack-limit(a, dst)
@@ -669,7 +669,7 @@ public defn encode (fid:Int, func:VMFunction,
     ;stack traces.
     defn record-trace-entry (entry:StackTraceEntry|False) :
       match(entry:StackTraceEntry) :
-        dump(a, "+++ %s\n", CONST(tmp1(), printf-format(to-string(entry)))) when debugging?
+        dump(a, "+++ %s\n", CONST(tmp1, printf-format(to-string(entry)))) when debugging?
         add(trace-entry-table, TraceTableEntry(buffer-pos(), entry))
 
     ;Calculation of sizes
@@ -698,13 +698,13 @@ public defn encode (fid:Int, func:VMFunction,
       all?(type-is-final?, types(b))
 
     defn GET-CRSP (dst:Gp) -> Gp :
-      mov(a, dst, MemPtr(rsp(), 0))
+      mov(a, dst, MemPtr(rsp, 0))
 
     ;VM register accesses
 
     defn GET-REG (dst:Gp, r:Int, mem-only?:True|False) -> Gp :
       mov(a, dst, reg-access(r, mem-only?))
-      dump(a, "  GET-REG[%d,%d] = %p\n", CONST(tmp2(), r), CONST(tmp3(), 1 when mem-only? else 0), dst) when tracing?
+      dump(a, "  GET-REG[%d,%d] = %p\n", CONST(tmp2, r), CONST(tmp3, 1 when mem-only? else 0), dst) when tracing?
       dst
     defn GET-REG (dst:Gp, r:Int) -> Gp :
       GET-REG(dst, r, MEM-REG-ONLY?)
@@ -730,21 +730,21 @@ public defn encode (fid:Int, func:VMFunction,
         SIZEOF-LONG : gp64(reg)
 
     defn local-access (l:Int) -> Gp|MemPtr :
-      local-regs()[l] when (l < num-local-regs()) else local-mem-access(l)
+      local-regs[l] when (l < num-local-regs) else local-mem-access(l)
 
     ;Local setters
     
     defn SET-LOCAL (l:Int, v:Gp) -> False :
       mov(a, local-access(l), v)
-      dump(a, "  SET-LOCAL[%d] = %p\n", CONST(rax(), l), v) when (debugging? or tracing?)
+      dump(a, "  SET-LOCAL[%d] = %p\n", CONST(rax, l), v) when (debugging? or tracing?)
       false
     defn SET-LOCAL (l:Int, v:Gp -> Gp) -> False :
-      ; val r = (mov(a, local-access(l), v(tmp1())), tmp1())
+      ; val r = (mov(a, local-access(l), v(tmp1)), tmp1)
       val r = match(local-access(l)) :
         (acc:Gp)     : v(acc)
-        (acc:MemPtr) : (mov(a, acc, v(tmp1())), tmp1())
+        (acc:MemPtr) : (mov(a, acc, v(tmp1)), tmp1)
       ; mov(a, local-access(l), v)
-      dump(a, "  SET-LOCAL[%d] = %p\n", CONST(rax(), l), r) when (debugging? or tracing?)
+      dump(a, "  SET-LOCAL[%d] = %p\n", CONST(rax, l), r) when (debugging? or tracing?)
       false
     defn SET-LOCAL-BYTE (l:Int, v:Gp) :
       and-op(a, v, 0xff)
@@ -754,10 +754,10 @@ public defn encode (fid:Int, func:VMFunction,
       SET-LOCAL(l, v)
     defn SET-LOCAL-FLOAT (l:Int,v:Xmm) :
       movsd(a, local-access(l), v)
-      dump(a, "SET-LOCAL-FLOAT[%d] %p\n", CONST(rax(), l), LOCAL(tmp1(), l)) when (debugging? or tracing?)
+      dump(a, "SET-LOCAL-FLOAT[%d] %p\n", CONST(rax, l), LOCAL(tmp1, l)) when (debugging? or tracing?)
     defn SET-LOCAL-DOUBLE (l:Int, v:Xmm) :
       movsd(a, local-access(l), v)
-      dump(a, "SET-LOCAL-DOUBLE[%d] %p\n", CONST(rax(), l), LOCAL(tmp1(), l)) when (debugging? or tracing?)
+      dump(a, "SET-LOCAL-DOUBLE[%d] %p\n", CONST(rax, l), LOCAL(tmp1, l)) when (debugging? or tracing?)
 
     ;Local getters
 
@@ -797,32 +797,32 @@ public defn encode (fid:Int, func:VMFunction,
 
     defn PUSH-FRAME-ONLY (num-locals:Int) :
       save-local-registers(a)
-      add(a, stack-pointer(), SIZEOF-STACK-FRAME + num-locals * SIZEOF-LONG)
+      add(a, stack-pointer, SIZEOF-STACK-FRAME + num-locals * SIZEOF-LONG)
 
     defn PUSH-FRAME (num-locals:Int, ret-addr:Label) :
       PUSH-FRAME-ONLY(num-locals)
-      lea(a, tmp1(), MemPtr(ret-addr, 0))
-      set-return(a, tmp1())
+      lea(a, tmp1, MemPtr(ret-addr, 0))
+      set-return(a, tmp1)
 
     defn POP-FRAME (num-locals:Int) :
-      add(a, stack-pointer(), -1 * (SIZEOF-STACK-FRAME + num-locals * SIZEOF-LONG))
+      add(a, stack-pointer, -1 * (SIZEOF-STACK-FRAME + num-locals * SIZEOF-LONG))
       restore-local-registers(a)
 
     ;Call support
 
     defn c-call (fptr:Gp) :
-      push(a, r10())
-      push(a, r11())
+      push(a, r10)
+      push(a, r11)
       call(a, fptr)
-      pop(a, r11())
-      pop(a, r10())
+      pop(a, r11)
+      pop(a, r10)
 
     defn c-call (fptr:Long) :
-      c-call(mov(a, rax(), fptr))
+      c-call(mov(a, rax, fptr))
 
     defn do-tcall (f:Gp) :
-      mov(a, tmp1(), MemPtr(functions(), f, 3, 0, SIZEOF-LONG))
-      jmp(a, tmp1())
+      mov(a, tmp1, MemPtr(functions, f, 3, 0, SIZEOF-LONG))
+      jmp(a, tmp1)
 
     defn do-call (f:Gp, num-locals:Int) :
       val end-label = new-label(a)
@@ -849,7 +849,7 @@ public defn encode (fid:Int, func:VMFunction,
 
     defn trace-opcode (opcode:Int, name:String) :
       val format = string-join $ [ "%d: " name "\n" ]
-      val counter = rdi()
+      val counter = rdi
       get-instructions(a, counter)
       dump(a, format, counter) when tracing?
       add(a, counter, 1)
@@ -875,31 +875,31 @@ public defn encode (fid:Int, func:VMFunction,
         FNENTRY-OPCODE :
           ; val start-label = new-label(a)
           ; bind(a, start-label)
-          ; lea(a, tmp1(), MemPtr(start-label, 0))
+          ; lea(a, tmp1, MemPtr(start-label, 0))
           val all-good-label = new-label(a)
           val extend-return-label = new-label(a)
           val frame-size = value * SIZEOF-LONG + SIZEOF-STACK-FRAME
           val size-required = frame-size + SIZEOF-STACK-FRAME
           ;Size-required must be in tmp3 to line up for extend-stack-launch
-          lea(a, tmp3(), MemPtr(stack-pointer(), size-required))
-          val limit = stack-limit(tmp2())
-          cmp(a, tmp3(), limit)
+          lea(a, tmp3, MemPtr(stack-pointer, size-required))
+          val limit = stack-limit(tmp2)
+          cmp(a, tmp3, limit)
           jle(a, all-good-label)
-          mov(a, tmp3(), size-required)
-          lea(a, tmp2(), MemPtr(extend-return-label, 0))
-          jmp(a, CONST(tmp1(), extend-stack-launch-value))
+          mov(a, tmp3, size-required)
+          lea(a, tmp2, MemPtr(extend-return-label, 0))
+          jmp(a, CONST(tmp1, extend-stack-launch-value))
           bind(a, extend-return-label)
           bind(a, all-good-label)
         DISPATCH-OPCODE :
           val tgts = new-label(a)
-          val idx = read-dispatch-table(a, tmp1(), vmstate(), CONST(tmp1(), value))
-          lea(a, tmp2(), MemPtr(tgts, 0))
-          mov(a, tmp2(), MemPtr(tmp2(), idx, 3, 0))
-          jmp(a, tmp2())
+          val idx = read-dispatch-table(a, tmp1, vmstate, CONST(tmp1, value))
+          lea(a, tmp2, MemPtr(tgts, 0))
+          mov(a, tmp2, MemPtr(tmp2, idx, 3, 0))
+          jmp(a, tmp2)
           bind(a, tgts)
         TCALL-CLOSURE-OPCODE :
-          mov(a, tmp2(), MemPtr(LOCAL(tmp1(), value), FUNCTION-CODE-OFFSET + SIZEOF-LONG - REF-TAG-BITS))
-          do-tcall(tmp2())
+          mov(a, tmp2, MemPtr(LOCAL(tmp1, value), FUNCTION-CODE-OFFSET + SIZEOF-LONG - REF-TAG-BITS))
+          do-tcall(tmp2)
         POP-FRAME-OPCODE :
           val num-locals = value
           POP-FRAME(num-locals)
@@ -907,63 +907,63 @@ public defn encode (fid:Int, func:VMFunction,
           val saved-label = new-label(a)
           ;Save current stack
           save-local-registers(a)
-          set-stack-pointer(a, stack-pointer())
-          lea(a, tmp1(), MemPtr(saved-label, 0))
-          set-pc(a, tmp1())
+          set-stack-pointer(a, stack-pointer)
+          lea(a, tmp1, MemPtr(saved-label, 0))
+          set-pc(a, tmp1)
           ;Load next stack
-          val next-stack = LOCAL(tmp1(), value)
+          val next-stack = LOCAL(tmp1, value)
           set-current-stack(a, next-stack)
-          untag-stack(a, stk(), next-stack)
-          get-frames(a, stack-pointer())
+          untag-stack(a, stk, next-stack)
+          get-frames(a, stack-pointer)
           restore-local-registers(a)
           ;Load starting address
-          get-pc(a, tmp1())
-          mov(a, tmp2(), MemPtr(functions(), tmp1(), 3, 0))
-          jmp(a, tmp2())
+          get-pc(a, tmp1)
+          mov(a, tmp2, MemPtr(functions, tmp1, 3, 0))
+          jmp(a, tmp2)
           bind(a, saved-label)
         YIELD-OPCODE :
           val continue-label = new-label(a)
           ;Save current stack
           save-local-registers(a)
-          set-stack-pointer(a, stack-pointer())
-          lea(a, tmp2(), MemPtr(continue-label, 0))
-          set-pc(a, tmp2())
+          set-stack-pointer(a, stack-pointer)
+          lea(a, tmp2, MemPtr(continue-label, 0))
+          set-pc(a, tmp2)
           ;Load next stack
-          val next-stack = LOCAL(tmp1(), value)
+          val next-stack = LOCAL(tmp1, value)
           set-current-stack(a, next-stack)
-          untag-stack(a, stk(), next-stack)
-          get-stack-pointer(a, stack-pointer())
+          untag-stack(a, stk, next-stack)
+          get-stack-pointer(a, stack-pointer)
           restore-local-registers(a)
           ;Load starting address
-          get-pc(a, tmp1())
-          jmp(a, tmp1())
+          get-pc(a, tmp1)
+          jmp(a, tmp1)
           bind(a, continue-label)
         RETURN-OPCODE : 
-          get-return(a, tmp1())
-          jmp(a, tmp1())
+          get-return(a, tmp1)
+          jmp(a, tmp1)
         DUMP-OPCODE :
           false
         LIVE-OPCODE :
-          mov(a, tmp2(), value)
-          set-liveness-map(a, tmp2())
+          mov(a, tmp2, value)
+          set-liveness-map(a, tmp2)
         DISPATCH-METHOD-OPCODE :
           val code-label = new-label(a)
           val tgts = new-label(a)
-          read-dispatch-table(a, tmp3(), vmstate(), CONST(tmp1(), value))
-          cmp(a, tmp3(), 2) ; < 2 are targets and >= 2 are methods to goto
+          read-dispatch-table(a, tmp3, vmstate, CONST(tmp1, value))
+          cmp(a, tmp3, 2) ; < 2 are targets and >= 2 are methods to goto
           jge(a, code-label)
-          lea(a, tmp2(), MemPtr(tgts, 0))
-          mov(a, tmp2(), MemPtr(tmp2(), tmp3(), 3, 0))
-          jmp(a, tmp2())
+          lea(a, tmp2, MemPtr(tgts, 0))
+          mov(a, tmp2, MemPtr(tmp2, tmp3, 3, 0))
+          jmp(a, tmp2)
           bind(a, code-label)
-          mov(a, tmp2(), MemPtr(functions(), tmp3(), 3, -2 * SIZEOF-LONG))
-          jmp(a, tmp2())
+          mov(a, tmp2, MemPtr(functions, tmp3, 3, -2 * SIZEOF-LONG))
+          jmp(a, tmp2)
           bind(a, tgts)
         FLUSH-VM-OPCODE :
           SAVE-STATE-ONLY(a)
-          SET-LOCAL(value, vmstate())
+          SET-LOCAL(value, vmstate)
         C-RSP-OPCODE :
-          SET-LOCAL(value, GET-CRSP(tmp1()))
+          SET-LOCAL(value, GET-CRSP(tmp1))
         else :
           fatal("MISSING A OPCODE %_" % [opcode])
 
@@ -987,118 +987,118 @@ public defn encode (fid:Int, func:VMFunction,
       dump-opcode(opcode-string(opcode, x, value)) when dumping-opcodes?
       switch(opcode) :
         INT-NOT-OPCODE :
-          not-op(a, LOCAL-DST!(tmp1(), value))
-          shr(a, tmp1(), 32)
-          shl(a, tmp1(), 32)
-          SET-LOCAL(x, tmp1())
+          not-op(a, LOCAL-DST!(tmp1, value))
+          shr(a, tmp1, 32)
+          shl(a, tmp1, 32)
+          SET-LOCAL(x, tmp1)
         INT-NEG-OPCODE :
-          val dst = neg(a, LOCAL-DST!(tmp1(), value))
+          val dst = neg(a, LOCAL-DST!(tmp1, value))
           SET-LOCAL(x, dst)
         NOT-OPCODE-BYTE :
-          xor-op(a, tmp1(), tmp1())
-          not-op(a, LOCAL-BYTE-DST!(tmp1b(), value))
-          SET-LOCAL-BYTE(x, tmp1())
+          xor-op(a, tmp1, tmp1)
+          not-op(a, LOCAL-BYTE-DST!(tmp1b, value))
+          SET-LOCAL-BYTE(x, tmp1)
         NOT-OPCODE-INT :
-          xor-op(a, tmp1(), tmp1()) ; TODO: REMOVE?
-          not-op(a, LOCAL-INT-DST!(tmp1i(), value))
-          SET-LOCAL-INT(x, tmp1())
+          xor-op(a, tmp1, tmp1) ; TODO: REMOVE?
+          not-op(a, LOCAL-INT-DST!(tmp1i, value))
+          SET-LOCAL-INT(x, tmp1)
         NOT-OPCODE-LONG :
-          val dst = not-op(a, LOCAL-DST!(tmp2(), value))
+          val dst = not-op(a, LOCAL-DST!(tmp2, value))
           SET-LOCAL(x, dst)
         NEG-OPCODE-INT :
-          val dst = neg(a, LOCAL-DST!(tmp1(), value))
+          val dst = neg(a, LOCAL-DST!(tmp1, value))
           SET-LOCAL-INT(x, dst)
         NEG-OPCODE-LONG :
-          val dst = neg(a, LOCAL-DST!(tmp2(), value))
+          val dst = neg(a, LOCAL-DST!(tmp2, value))
           SET-LOCAL(x, dst)
         NEG-OPCODE-FLOAT :
-          xor-op(a, tmp1(), tmp1()) ; FASTER METHOD?
-          cvtsi2ss(a, xmm0(), tmp1())
-          subss(a, xmm0(), LOCAL-FLOAT(xmm1(), value))
-          SET-LOCAL-FLOAT(x, xmm0())
+          xor-op(a, tmp1, tmp1) ; FASTER METHOD?
+          cvtsi2ss(a, xmm0, tmp1)
+          subss(a, xmm0, LOCAL-FLOAT(xmm1, value))
+          SET-LOCAL-FLOAT(x, xmm0)
         NEG-OPCODE-DOUBLE :
-          xor-op(a, tmp1(), tmp1()) ; FASTER METHOD?
-          cvtsi2sd(a, xmm0(), tmp1())
-          subsd(a, xmm0(), LOCAL-DOUBLE(xmm1(), value))
-          SET-LOCAL-DOUBLE(x, xmm0())
+          xor-op(a, tmp1, tmp1) ; FASTER METHOD?
+          cvtsi2sd(a, xmm0, tmp1)
+          subsd(a, xmm0, LOCAL-DOUBLE(xmm1, value))
+          SET-LOCAL-DOUBLE(x, xmm0)
         CONV-OPCODE-BYTE-FLOAT :
-          cvtss2si(a, tmp1b(), LOCAL-FLOAT(xmm0(), value))
-          SET-LOCAL-BYTE(x, tmp1())
+          cvtss2si(a, tmp1b, LOCAL-FLOAT(xmm0, value))
+          SET-LOCAL-BYTE(x, tmp1)
         CONV-OPCODE-BYTE-DOUBLE :
-          cvtsd2si(a, tmp1(), LOCAL-DOUBLE(xmm0(), value))
-          SET-LOCAL-BYTE(x, tmp1())
+          cvtsd2si(a, tmp1, LOCAL-DOUBLE(xmm0, value))
+          SET-LOCAL-BYTE(x, tmp1)
         CONV-OPCODE-INT-BYTE :
-          xor-op(a, tmp1(), tmp1()) ; TODO: REMOVE?
-          mov(a, tmp1b(), LOCAL-BYTE(tmp1b(), value))
-          SET-LOCAL-INT(x, tmp1())
+          xor-op(a, tmp1, tmp1) ; TODO: REMOVE?
+          mov(a, tmp1b, LOCAL-BYTE(tmp1b, value))
+          SET-LOCAL-INT(x, tmp1)
         CONV-OPCODE-INT-FLOAT :
-          cvtss2si(a, tmp1i(), LOCAL-FLOAT(xmm0(), value))
-          SET-LOCAL-INT(x, tmp1())
+          cvtss2si(a, tmp1i, LOCAL-FLOAT(xmm0, value))
+          SET-LOCAL-INT(x, tmp1)
         CONV-OPCODE-INT-DOUBLE :
-          cvtsd2si(a, tmp1i(), LOCAL-DOUBLE(xmm0(), value))
-          SET-LOCAL-INT(x, tmp1())
+          cvtsd2si(a, tmp1i, LOCAL-DOUBLE(xmm0, value))
+          SET-LOCAL-INT(x, tmp1)
         CONV-OPCODE-LONG-BYTE :
-          xor-op(a, tmp1(), tmp1()) ; TODO: REMOVE?
-          mov(a, tmp1b(), LOCAL-BYTE(tmp1b(), value))
-          SET-LOCAL(x, tmp1())
+          xor-op(a, tmp1, tmp1) ; TODO: REMOVE?
+          mov(a, tmp1b, LOCAL-BYTE(tmp1b, value))
+          SET-LOCAL(x, tmp1)
         CONV-OPCODE-LONG-INT :
-          SET-LOCAL(x, { movsxd(a, _, LOCAL-INT(tmp2i(), value)) })
+          SET-LOCAL(x, { movsxd(a, _, LOCAL-INT(tmp2i, value)) })
         CONV-OPCODE-LONG-FLOAT :
-          SET-LOCAL(x, { cvtss2si(a, _, LOCAL-FLOAT(xmm0(), value)) })
+          SET-LOCAL(x, { cvtss2si(a, _, LOCAL-FLOAT(xmm0, value)) })
         CONV-OPCODE-LONG-DOUBLE :
-          SET-LOCAL(x, { cvtsd2si(a, _, LOCAL-DOUBLE(xmm0(), value)) })
+          SET-LOCAL(x, { cvtsd2si(a, _, LOCAL-DOUBLE(xmm0, value)) })
         CONV-OPCODE-FLOAT-BYTE :
-          cvtsi2ss(a, xmm0(), LOCAL-BYTE(tmp1b(), value))
-          SET-LOCAL-FLOAT(x, xmm0())
+          cvtsi2ss(a, xmm0, LOCAL-BYTE(tmp1b, value))
+          SET-LOCAL-FLOAT(x, xmm0)
         CONV-OPCODE-FLOAT-INT :
-          cvtsi2ss(a, xmm0(), LOCAL-INT(tmp1i(), value))
-          SET-LOCAL-FLOAT(x, xmm0())
+          cvtsi2ss(a, xmm0, LOCAL-INT(tmp1i, value))
+          SET-LOCAL-FLOAT(x, xmm0)
         CONV-OPCODE-FLOAT-LONG :
-          cvtsi2ss(a, xmm0(), LOCAL(tmp2(), value))
-          SET-LOCAL-FLOAT(x, xmm0())
+          cvtsi2ss(a, xmm0, LOCAL(tmp2, value))
+          SET-LOCAL-FLOAT(x, xmm0)
         CONV-OPCODE-FLOAT-DOUBLE :
-          cvtsd2ss(a, xmm1(), LOCAL-DOUBLE(xmm0(), value))
-          SET-LOCAL-FLOAT(x, xmm1())
+          cvtsd2ss(a, xmm1, LOCAL-DOUBLE(xmm0, value))
+          SET-LOCAL-FLOAT(x, xmm1)
         CONV-OPCODE-DOUBLE-BYTE :
-          cvtsi2sd(a, xmm0(), LOCAL(tmp1(), value))
-          SET-LOCAL-DOUBLE(x, xmm0())
+          cvtsi2sd(a, xmm0, LOCAL(tmp1, value))
+          SET-LOCAL-DOUBLE(x, xmm0)
         CONV-OPCODE-DOUBLE-INT :
-          cvtsi2sd(a, xmm0(), LOCAL(tmp1(), value))
-          SET-LOCAL-DOUBLE(x, xmm0())
+          cvtsi2sd(a, xmm0, LOCAL(tmp1, value))
+          SET-LOCAL-DOUBLE(x, xmm0)
         CONV-OPCODE-DOUBLE-LONG :
-          cvtsi2sd(a, xmm0(), LOCAL(tmp2(), value))
-          SET-LOCAL-DOUBLE(x, xmm0())
+          cvtsi2sd(a, xmm0, LOCAL(tmp2, value))
+          SET-LOCAL-DOUBLE(x, xmm0)
         CONV-OPCODE-DOUBLE-FLOAT :
-          cvtss2sd(a, xmm1(), LOCAL-FLOAT(xmm0(), value))
-          SET-LOCAL-DOUBLE(x, xmm1())
+          cvtss2sd(a, xmm1, LOCAL-FLOAT(xmm0, value))
+          SET-LOCAL-DOUBLE(x, xmm1)
         TAG-OPCODE-BYTE :
-          SET-LOCAL(x, { TAG(_, LOCAL(tmp2(), value), BYTE-TAG-BITS) })
+          SET-LOCAL(x, { TAG(_, LOCAL(tmp2, value), BYTE-TAG-BITS) })
         TAG-OPCODE-CHAR :
-          SET-LOCAL(x, { TAG(_, LOCAL(tmp2(), value), CHAR-TAG-BITS) })
+          SET-LOCAL(x, { TAG(_, LOCAL(tmp2, value), CHAR-TAG-BITS) })
         TAG-OPCODE-INT :
-          SET-LOCAL(x, { TAG(_, LOCAL(tmp2(), value), INT-TAG-BITS) })
+          SET-LOCAL(x, { TAG(_, LOCAL(tmp2, value), INT-TAG-BITS) })
         TAG-OPCODE-FLOAT :
-          SET-LOCAL(x, { TAG(_, LOCAL(tmp2(), value), FLOAT-TAG-BITS) })
+          SET-LOCAL(x, { TAG(_, LOCAL(tmp2, value), FLOAT-TAG-BITS) })
         DETAG-OPCODE :
-          SET-LOCAL(x, { DETAG(_, LOCAL(tmp2(), value)) })
+          SET-LOCAL(x, { DETAG(_, LOCAL(tmp2, value)) })
         DEREF-OPCODE :
-          val ref = LOCAL-DST!(tmp2(), value)
+          val ref = LOCAL-DST!(tmp2, value)
           add(a, ref, 8 - REF-TAG-BITS)
           SET-LOCAL(x, ref)
         GC-OPCODE :
-          val size = LOCAL(tmp1(), value)
+          val size = LOCAL(tmp1, value)
           save-local-registers(a)
           SAVE-STATE(a)
-          call-garbage-collector(a, vmstate(), size)
+          call-garbage-collector(a, vmstate, size)
           RESTORE-STATE(a)
           restore-local-registers(a)
-          SET-LOCAL(x, rax())
+          SET-LOCAL(x, rax)
         CLASS-NAME-OPCODE :
-          SET-LOCAL(x, retrieve-class-name(a, vmstate(), LOCAL(tmp1(), value)))
+          SET-LOCAL(x, retrieve-class-name(a, vmstate, LOCAL(tmp1, value)))
         PRINT-STACK-TRACE-OPCODE :
-          SET-LOCAL(x, call-print-stack-trace(a, vmstate(), LOCAL(tmp1(), value)))
+          SET-LOCAL(x, call-print-stack-trace(a, vmstate, LOCAL(tmp1, value)))
         COLLECT-STACK-TRACE-OPCODE :
-          SET-LOCAL(x, call-collect-stack-trace(a, vmstate(), LOCAL(tmp1(), value)))
+          SET-LOCAL(x, call-collect-stack-trace(a, vmstate, LOCAL(tmp1, value)))
         GET-REG-OPCODE :
           SET-LOCAL(x, { GET-REG(_, value) })
         else :
@@ -1107,50 +1107,50 @@ public defn encode (fid:Int, func:VMFunction,
     defn do-callc (num-locals:Int, faddr:Gp) :
       PUSH-FRAME-ONLY(num-locals)
       SAVE-STATE(a)
-      c-trampoline(a, faddr, registers(), registers())
+      c-trampoline(a, faddr, registers, registers)
       RESTORE-STATE(a)
       POP-FRAME(num-locals)
 
     defn get-function (dst:Gp, id:Gp) -> Gp :
-      mov(a, dst, MemPtr(functions(), id, 3, 0))
+      mov(a, dst, MemPtr(functions, id, 3, 0))
 
     defn get-global (dst:Gp, tmp1:Gp, tmp2:Gp, value:Int) -> Gp :
       mov(a, tmp1, MemPtr(global-offsets(tmp2), value * SIZEOF-LONG, SIZEOF-LONG))
       lea(a, dst, MemPtr(global-mem(tmp2), tmp1, 0, 0))
 
-    defn get-global (dst:Gp, value:Int) -> Gp : get-global(dst, tmp2(), rax(), value)
+    defn get-global (dst:Gp, value:Int) -> Gp : get-global(dst, tmp2, rax, value)
 
     defn get-data (dst:Gp, tmp1:Gp, tmp2:Gp, value:Int) -> Gp :
       mov(a, gp32(tmp1), MemPtr(data-offsets(tmp1), value * SIZEOF-INT, SIZEOF-INT))
       lea(a, dst, MemPtr(data-mem(tmp2), gp32(tmp1), 3, 0))
 
-    defn get-data (dst:Gp, value:Int) -> Gp : get-data(dst, tmp2(), rax(), value)
+    defn get-data (dst:Gp, value:Int) -> Gp : get-data(dst, tmp2, rax, value)
 
     defn get-const (dst:Gp, tmp1:Gp, value:Int) -> Gp :
       mov(a, dst, MemPtr(const-table(tmp1), value * SIZEOF-LONG, SIZEOF-LONG))
 
-    defn get-const (dst:Gp, value:Int) -> Gp : get-const(dst, rax(), value)
+    defn get-const (dst:Gp, value:Int) -> Gp : get-const(dst, rax, value)
 
     defn emit-ins-c (opcode:Int, x:Int, value:Int) :
       trace-opcode(opcode, opcode-string(opcode, x, value)) when tracing?
       dump-opcode(opcode-string(opcode, x, value)) when dumping-opcodes?
       switch(opcode) :
         TCALL-OPCODE-LOCAL :
-          do-tcall(LOCAL(tmp2(), value))
+          do-tcall(LOCAL(tmp2, value))
         TCALL-OPCODE-CODE :
-          do-tcall(CONST(tmp2(), value))
+          do-tcall(CONST(tmp2, value))
         CALL-OPCODE-LOCAL :
-          do-call(LOCAL(tmp2(), value), x)
+          do-call(LOCAL(tmp2, value), x)
         CALL-OPCODE-CODE :
-          do-call(CONST(tmp2(), value), x)
+          do-call(CONST(tmp2, value), x)
         CALL-CLOSURE-OPCODE :
-          mov(a, tmp2(), MemPtr(LOCAL(tmp1(), value), FUNCTION-CODE-OFFSET + SIZEOF-LONG - REF-TAG-BITS))
-          do-call(tmp2(), x)
+          mov(a, tmp2, MemPtr(LOCAL(tmp1, value), FUNCTION-CODE-OFFSET + SIZEOF-LONG - REF-TAG-BITS))
+          do-call(tmp2, x)
         CALLC-OPCODE-LOCAL :
-          do-callc(x, LOCAL(tmp2(), value))
+          do-callc(x, LOCAL(tmp2, value))
         TYPEOF-OPCODE :
-          read-dispatch-table(a, tmp3(), vmstate(), CONST(tmp2(), value))
-          SET-LOCAL(x, tmp3())
+          read-dispatch-table(a, tmp3, vmstate, CONST(tmp2, value))
+          SET-LOCAL(x, tmp3)
         SET-REG-OPCODE-LOCAL :
           SET-REG(x, { LOCAL-DST!(_, value) })
         SET-REG-OPCODE-UNSIGNED :
@@ -1168,7 +1168,7 @@ public defn encode (fid:Int, func:VMFunction,
         SET-REG-OPCODE-UNSIGNED :
           SET-REG(x, { mov(a, _, value) })
         SET-REG-OPCODE-SIGNED :
-          SET-REG-INT(x, CONST(tmp1(), value))
+          SET-REG-INT(x, CONST(tmp1, value))
         SET-OPCODE-LOCAL :
           SET-LOCAL(x, { LOCAL-DST!(_, value) }) when x != value
         SET-OPCODE-UNSIGNED :
@@ -1190,25 +1190,25 @@ public defn encode (fid:Int, func:VMFunction,
       trace-opcode(opcode, opcode-string(opcode, x, y, value)) when tracing?
       dump-opcode(opcode-string(opcode, x, y, value)) when dumping-opcodes?
       defn do-reserve (size:Gp, num-locals:Int) :
-        add(a, heap-top(tmp2()), size)
-        cmp(a, tmp2(), heap-limit(rax()))
+        add(a, heap-top(tmp2), size)
+        cmp(a, tmp2, heap-limit(rax))
         jle(a, x)
-        SET-REG(0, BOOLREF(CONST(tmp1(), 0)))
+        SET-REG(0, BOOLREF(CONST(tmp1, 0)))
         SET-REG(1, { mov(a, _, 1L) })
         SET-REG(2, { mov(a, _, size) })
-        mov(a, tmp2(), MemPtr(functions(), SIZEOF-LONG * EXTEND-HEAP-FN))
+        mov(a, tmp2, MemPtr(functions, SIZEOF-LONG * EXTEND-HEAP-FN))
         val end-label = new-label(a)
         PUSH-FRAME(num-locals, end-label)
-        jmp(a, tmp2())
+        jmp(a, tmp2)
         bind(a, end-label)
       switch(opcode) :
         RESERVE-OPCODE-LOCAL :
-          val size = tmp3()
+          val size = tmp3
           add(a, LOCAL-DST!(size, value), 8 + 7)
-          and-op(a, size, CONST(tmp2(), (- 8L)))
+          and-op(a, size, CONST(tmp2, (- 8L)))
           do-reserve(size, y)
         RESERVE-OPCODE-CONST :
-          do-reserve(CONST(tmp3(), value), y)
+          do-reserve(CONST(tmp3, value), y)
 
     defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Label) :
       trace-opcode(opcode, opcode-string(opcode, x, y, value)) when tracing?
@@ -1217,7 +1217,7 @@ public defn encode (fid:Int, func:VMFunction,
         JUMP-REG-OPCODE :
           val reg = x
           val arity = y
-          cmp(a, GET-REG(tmp1(), reg, false), arity)
+          cmp(a, GET-REG(tmp1, reg, false), arity)
           je(a, value as Label)
 
     defn cmp-set (a:Assembler, x:Gp, y:Gp, z:Gp, zb:Gp, set:(Assembler, Gp) -> False) -> Gp :
@@ -1242,328 +1242,328 @@ public defn encode (fid:Int, func:VMFunction,
       trace-opcode(opcode, opcode-string(opcode, x, y, value)) when tracing?
       dump-opcode(opcode-string(opcode, x, y, value)) when dumping-opcodes?
       defn do-alloc (type:Int, num-bytes:Gp) :
-        val top = tmp2()
+        val top = tmp2
         heap-top(top)
-        mov(a, MemPtr(top, 0), CONST(tmp1(), value))
+        mov(a, MemPtr(top, 0), CONST(tmp1, value))
         SET-LOCAL(x, { ptr-to-ref(_, top) })
         add(a, top, num-bytes)
         set-heap-top(a, top)
       switch(opcode) :
         INT-ADD-OPCODE :
-          SET-LOCAL(x, { add(a, LOCAL-DST!(_, y), LOCAL(tmp2(), value)) })
+          SET-LOCAL(x, { add(a, LOCAL-DST!(_, y), LOCAL(tmp2, value)) })
         INT-SUB-OPCODE :
-          SET-LOCAL(x, { sub(a, LOCAL-DST!(_, y), LOCAL(tmp2(), value)) })
+          SET-LOCAL(x, { sub(a, LOCAL-DST!(_, y), LOCAL(tmp2, value)) })
         INT-MUL-OPCODE :
-          shr(a, LOCAL-DST!(tmp1(), y), 32)
-          imul(a, tmp1(), LOCAL(tmp2(), value))
-          SET-LOCAL(x, tmp1())
+          shr(a, LOCAL-DST!(tmp1, y), 32)
+          imul(a, tmp1, LOCAL(tmp2, value))
+          SET-LOCAL(x, tmp1)
         INT-DIV-OPCODE :
-          xor-op(a, rdx(), rdx())
-          LOCAL-DST!(rax(), y), 
-          div(a, LOCAL(tmp2(), value))
-          shl(a, rax(), 32)
-          SET-LOCAL(x, rax())
+          xor-op(a, rdx, rdx)
+          LOCAL-DST!(rax, y), 
+          div(a, LOCAL(tmp2, value))
+          shl(a, rax, 32)
+          SET-LOCAL(x, rax)
         INT-MOD-OPCODE :
-          xor-op(a, rdx(), rdx())
-          LOCAL-DST!(rax(), y), 
-          div(a, LOCAL(tmp2(), value))
-          SET-LOCAL(x, rdx())
+          xor-op(a, rdx, rdx)
+          LOCAL-DST!(rax, y), 
+          div(a, LOCAL(tmp2, value))
+          SET-LOCAL(x, rdx)
         INT-AND-OPCODE :
-          SET-LOCAL(x, { and-op(a, LOCAL-DST!(_, y), LOCAL(tmp2(), value)) })
+          SET-LOCAL(x, { and-op(a, LOCAL-DST!(_, y), LOCAL(tmp2, value)) })
         INT-OR-OPCODE :
-          SET-LOCAL(x, { or-op(a, LOCAL-DST!(_, y), LOCAL(tmp2(), value)) })
+          SET-LOCAL(x, { or-op(a, LOCAL-DST!(_, y), LOCAL(tmp2, value)) })
         INT-XOR-OPCODE :
-          SET-LOCAL(x, { xor-op(a, LOCAL-DST!(_, y), LOCAL(tmp2(), value)) })
+          SET-LOCAL(x, { xor-op(a, LOCAL-DST!(_, y), LOCAL(tmp2, value)) })
         INT-SHL-OPCODE :
-          shr(a, LOCAL-DST!(rcx(), value), 32) 
-          SET-LOCAL(x, { shl(a, LOCAL-DST!(_, y), rcx()) })
+          shr(a, LOCAL-DST!(rcx, value), 32) 
+          SET-LOCAL(x, { shl(a, LOCAL-DST!(_, y), rcx) })
         INT-SHR-OPCODE :
           defn shift (dst:Gp) -> Gp :
-            shr(a, LOCAL-DST!(rcx(), value), 32)
-            shr(a, LOCAL-DST!(dst, y), rcx())
+            shr(a, LOCAL-DST!(rcx, value), 32)
+            shr(a, LOCAL-DST!(dst, y), rcx)
             shr(a, dst, 32)
             shl(a, dst, 32)
           SET-LOCAL(x, shift)
         INT-ASHR-OPCODE :
           defn shift (dst:Gp) -> Gp :
-            shr(a, LOCAL-DST!(rcx(), value), 32)
-            ashr(a, LOCAL-DST!(dst, y), rcx())
+            shr(a, LOCAL-DST!(rcx, value), 32)
+            ashr(a, LOCAL-DST!(dst, y), rcx)
             shr(a, dst, 32)
             shl(a, dst, 32)
           SET-LOCAL(x, shift)
         INT-LT-OPCODE :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-l)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-l)
           SET-LOCAL(x, BOOLREF(res))
         INT-GT-OPCODE :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-g)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-g)
           SET-LOCAL(x, BOOLREF(res))
         INT-LE-OPCODE :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-le)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-le)
           SET-LOCAL(x, BOOLREF(res))
         INT-GE-OPCODE :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-ge)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-ge)
           SET-LOCAL(x, BOOLREF(res))
         REF-EQ-OPCODE :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-e)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-e)
           SET-LOCAL(x, BOOLREF(res))
         EQ-OPCODE-REF :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-e)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-e)
           SET-LOCAL(x, res)
         EQ-OPCODE-BYTE :
-          val res = cmp-set(a, LOCAL-BYTE(tmp1b(), y), LOCAL-BYTE(tmp2b(), value), tmp3(), tmp3b(), set-e)
+          val res = cmp-set(a, LOCAL-BYTE(tmp1b, y), LOCAL-BYTE(tmp2b, value), tmp3, tmp3b, set-e)
           SET-LOCAL(x, res)
         EQ-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i(), y), LOCAL-INT(tmp2i(), value), tmp3(), tmp3b(), set-e)
+          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-e)
           SET-LOCAL(x, res)
         EQ-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-e)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-e)
           SET-LOCAL(x, res)
         EQ-OPCODE-FLOAT :
-          val res = cmpf-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-e)
+          val res = cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), tmp3, tmp3b, set-e)
           SET-LOCAL(x, res)
         EQ-OPCODE-DOUBLE :
-          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value), tmp3(), tmp3b(), set-e)
+          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), tmp3, tmp3b, set-e)
           SET-LOCAL(x, res)
         REF-NE-OPCODE :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-ne)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-ne)
           SET-LOCAL(x, BOOLREF(res))
         NE-OPCODE-REF :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-ne)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-ne)
           SET-LOCAL(x, res)
         NE-OPCODE-BYTE :
-          val res = cmp-set(a, LOCAL-BYTE(tmp1b(), y), LOCAL-BYTE(tmp2b(), value), tmp3(), tmp3b(), set-ne)
+          val res = cmp-set(a, LOCAL-BYTE(tmp1b, y), LOCAL-BYTE(tmp2b, value), tmp3, tmp3b, set-ne)
           SET-LOCAL(x, res)
         NE-OPCODE-INT :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-ne)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-ne)
           SET-LOCAL(x, res)
         NE-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-ne)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-ne)
           SET-LOCAL(x, res)
         NE-OPCODE-FLOAT :
-          val res = cmpf-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-ne)
+          val res = cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), tmp3, tmp3b, set-ne)
           SET-LOCAL(x, res)
         NE-OPCODE-DOUBLE :
-          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value), tmp3(), tmp3b(), set-ne)
+          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), tmp3, tmp3b, set-ne)
           SET-LOCAL(x, res)
         ADD-OPCODE-BYTE :
-          val dst = add(a, LOCAL-BYTE-DST!(tmp1b(), y), LOCAL-BYTE(tmp2b(), value))
+          val dst = add(a, LOCAL-BYTE-DST!(tmp1b, y), LOCAL-BYTE(tmp2b, value))
           SET-LOCAL-BYTE(x, gp64(dst))
         ADD-OPCODE-INT :
-          val dst = add(a, LOCAL-INT-DST!(tmp1i(), y), LOCAL-INT(tmp2i(), value))
+          val dst = add(a, LOCAL-INT-DST!(tmp1i, y), LOCAL-INT(tmp2i, value))
           SET-LOCAL-INT(x, gp64(dst))
         ADD-OPCODE-LONG :
-          val dst = add(a, LOCAL-DST!(tmp1(), y), LOCAL(tmp2(), value))
+          val dst = add(a, LOCAL-DST!(tmp1, y), LOCAL(tmp2, value))
           SET-LOCAL(x, dst)
         ADD-OPCODE-FLOAT :
-          val dst = addss(a, LOCAL-FLOAT-DST!(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
+          val dst = addss(a, LOCAL-FLOAT-DST!(xmm0, y), LOCAL-FLOAT(xmm1, value))
           SET-LOCAL-FLOAT(x, dst)
         ADD-OPCODE-DOUBLE :
-          val dst = addsd(a, LOCAL-DOUBLE-DST!(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
+          val dst = addsd(a, LOCAL-DOUBLE-DST!(xmm0, y), LOCAL-DOUBLE(xmm1, value))
           SET-LOCAL-DOUBLE(x, dst)
         SUB-OPCODE-BYTE :
-          val dst = sub(a, LOCAL-BYTE-DST!(tmp1b(), y), LOCAL-BYTE(tmp2b(), value))
+          val dst = sub(a, LOCAL-BYTE-DST!(tmp1b, y), LOCAL-BYTE(tmp2b, value))
           SET-LOCAL-BYTE(x, gp64(dst))
         SUB-OPCODE-INT :
-          val dst = sub(a, LOCAL-INT-DST!(tmp1i(), y), LOCAL-INT(tmp2i(), value))
+          val dst = sub(a, LOCAL-INT-DST!(tmp1i, y), LOCAL-INT(tmp2i, value))
           SET-LOCAL-INT(x, gp64(dst))
         SUB-OPCODE-LONG :
-          val dst = sub(a, LOCAL-DST!(tmp1(), y), LOCAL(tmp2(), value))
+          val dst = sub(a, LOCAL-DST!(tmp1, y), LOCAL(tmp2, value))
           SET-LOCAL(x, dst)
         SUB-OPCODE-FLOAT :
-          val dst = subss(a, LOCAL-FLOAT-DST!(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
+          val dst = subss(a, LOCAL-FLOAT-DST!(xmm0, y), LOCAL-FLOAT(xmm1, value))
           SET-LOCAL-FLOAT(x, dst)
         SUB-OPCODE-DOUBLE :
-          val dst = subsd(a, LOCAL-DOUBLE-DST!(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
+          val dst = subsd(a, LOCAL-DOUBLE-DST!(xmm0, y), LOCAL-DOUBLE(xmm1, value))
           SET-LOCAL-DOUBLE(x, dst)
         MUL-OPCODE-BYTE :
-          val dst = imul(a, LOCAL-INT-DST!(tmp1i(), y), LOCAL-INT(tmp2i(), value))
+          val dst = imul(a, LOCAL-INT-DST!(tmp1i, y), LOCAL-INT(tmp2i, value))
           SET-LOCAL-BYTE(x, gp64(dst))
         MUL-OPCODE-INT :
-          val dst = imul(a, LOCAL-INT-DST!(tmp1i(), y), LOCAL-INT(tmp2i(), value))
+          val dst = imul(a, LOCAL-INT-DST!(tmp1i, y), LOCAL-INT(tmp2i, value))
           SET-LOCAL-INT(x, gp64(dst))
         MUL-OPCODE-LONG :
-          SET-LOCAL(x, { imul(a, LOCAL-DST!(_, y), LOCAL(tmp2(), value)) })
+          SET-LOCAL(x, { imul(a, LOCAL-DST!(_, y), LOCAL(tmp2, value)) })
         MUL-OPCODE-FLOAT :
-          val dst = mulss(a, LOCAL-FLOAT-DST!(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
+          val dst = mulss(a, LOCAL-FLOAT-DST!(xmm0, y), LOCAL-FLOAT(xmm1, value))
           SET-LOCAL-FLOAT(x, dst)
         MUL-OPCODE-DOUBLE :
-          val dst = mulsd(a, LOCAL-DOUBLE-DST!(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
+          val dst = mulsd(a, LOCAL-DOUBLE-DST!(xmm0, y), LOCAL-DOUBLE(xmm1, value))
           SET-LOCAL-DOUBLE(x, dst)
         DIV-OPCODE-BYTE :
-          xor-op(a, rdx(), rdx())
-          LOCAL-DST!(rax(), y), 
-          div(a, LOCAL(tmp2(), value))
-          SET-LOCAL-BYTE(x, rax())
+          xor-op(a, rdx, rdx)
+          LOCAL-DST!(rax, y), 
+          div(a, LOCAL(tmp2, value))
+          SET-LOCAL-BYTE(x, rax)
         DIV-OPCODE-INT :
-          xor-op(a, rdx(), rdx())
-          LOCAL-DST!(rax(), y), 
-          div(a, LOCAL(tmp2(), value))
-          SET-LOCAL-INT(x, rax())
+          xor-op(a, rdx, rdx)
+          LOCAL-DST!(rax, y), 
+          div(a, LOCAL(tmp2, value))
+          SET-LOCAL-INT(x, rax)
         DIV-OPCODE-LONG :
-          xor-op(a, rdx(), rdx())
-          LOCAL-DST!(rax(), y)
-          div(a, LOCAL(tmp2(), value))
-          SET-LOCAL(x, rax())
+          xor-op(a, rdx, rdx)
+          LOCAL-DST!(rax, y)
+          div(a, LOCAL(tmp2, value))
+          SET-LOCAL(x, rax)
         DIV-OPCODE-FLOAT :
-          val dst = divss(a, LOCAL-FLOAT-DST!(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
+          val dst = divss(a, LOCAL-FLOAT-DST!(xmm0, y), LOCAL-FLOAT(xmm1, value))
           SET-LOCAL-FLOAT(x, dst)
         DIV-OPCODE-DOUBLE :
-          val dst = divsd(a, LOCAL-DOUBLE-DST!(xmm0(), y), LOCAL-DOUBLE(xmm1(), value))
+          val dst = divsd(a, LOCAL-DOUBLE-DST!(xmm0, y), LOCAL-DOUBLE(xmm1, value))
           SET-LOCAL-DOUBLE(x, dst)
         MOD-OPCODE-BYTE :
-          xor-op(a, rdx(), rdx())
-          LOCAL-DST!(rax(), y)
-          div(a, LOCAL(tmp2(), value))
-          SET-LOCAL-BYTE(x, rdx())
+          xor-op(a, rdx, rdx)
+          LOCAL-DST!(rax, y)
+          div(a, LOCAL(tmp2, value))
+          SET-LOCAL-BYTE(x, rdx)
         MOD-OPCODE-INT :
-          xor-op(a, rdx(), rdx())
-          LOCAL-DST!(rax(), y)
-          div(a, LOCAL(tmp2(), value))
-          SET-LOCAL-INT(x, rdx())
+          xor-op(a, rdx, rdx)
+          LOCAL-DST!(rax, y)
+          div(a, LOCAL(tmp2, value))
+          SET-LOCAL-INT(x, rdx)
         MOD-OPCODE-LONG :
-          xor-op(a, rdx(), rdx())
-          LOCAL-DST!(rax(), y)
-          div(a, LOCAL(tmp2(), value))
-          SET-LOCAL(x, rdx())
+          xor-op(a, rdx, rdx)
+          LOCAL-DST!(rax, y)
+          div(a, LOCAL(tmp2, value))
+          SET-LOCAL(x, rdx)
         AND-OPCODE-BYTE :
-          val dst = and-op(a, LOCAL-BYTE-DST!(tmp1b(), y), LOCAL-BYTE(tmp2b(), value))
+          val dst = and-op(a, LOCAL-BYTE-DST!(tmp1b, y), LOCAL-BYTE(tmp2b, value))
           SET-LOCAL-BYTE(x, gp64(dst))
         AND-OPCODE-INT :
-          val dst = and-op(a, LOCAL-INT-DST!(tmp1i(), y), LOCAL-INT(tmp2i(), value))
+          val dst = and-op(a, LOCAL-INT-DST!(tmp1i, y), LOCAL-INT(tmp2i, value))
           SET-LOCAL-INT(x, gp64(dst))
         AND-OPCODE-LONG :
-          SET-LOCAL(x, { and-op(a, LOCAL-DST!(_, y), LOCAL(tmp2(), value)) })
+          SET-LOCAL(x, { and-op(a, LOCAL-DST!(_, y), LOCAL(tmp2, value)) })
         OR-OPCODE-BYTE :
-          val dst = or-op(a, LOCAL-BYTE-DST!(tmp1b(), y), LOCAL-BYTE(tmp2b(), value))
+          val dst = or-op(a, LOCAL-BYTE-DST!(tmp1b, y), LOCAL-BYTE(tmp2b, value))
           SET-LOCAL-BYTE(x, gp64(dst))
         OR-OPCODE-INT :
-          val dst = or-op(a, LOCAL-INT-DST!(tmp1i(), y), LOCAL-INT(tmp2i(), value))
+          val dst = or-op(a, LOCAL-INT-DST!(tmp1i, y), LOCAL-INT(tmp2i, value))
           SET-LOCAL-INT(x, gp64(dst))
         OR-OPCODE-LONG :
-          val dst = or-op(a, LOCAL-DST!(tmp1(), y), LOCAL(tmp2(), value))
+          val dst = or-op(a, LOCAL-DST!(tmp1, y), LOCAL(tmp2, value))
           SET-LOCAL(x, dst)
         XOR-OPCODE-BYTE :
-          val dst = xor-op(a, LOCAL-BYTE-DST!(tmp1b(), y), LOCAL-BYTE(tmp2b(), value))
+          val dst = xor-op(a, LOCAL-BYTE-DST!(tmp1b, y), LOCAL-BYTE(tmp2b, value))
           SET-LOCAL-BYTE(x, gp64(dst))
         XOR-OPCODE-INT :
-          val dst = xor-op(a, LOCAL-INT-DST!(tmp1i(), y), LOCAL-INT(tmp2i(), value))
+          val dst = xor-op(a, LOCAL-INT-DST!(tmp1i, y), LOCAL-INT(tmp2i, value))
           SET-LOCAL-INT(x, gp64(dst))
         XOR-OPCODE-LONG :
-          SET-LOCAL(x, { xor-op(a, LOCAL-DST!(_, y), LOCAL(tmp2(), value)) })
+          SET-LOCAL(x, { xor-op(a, LOCAL-DST!(_, y), LOCAL(tmp2, value)) })
         SHL-OPCODE-BYTE :
-          val dst = shl(a, LOCAL-DST!(tmp1(), y), LOCAL-DST!(rcx(), value))
+          val dst = shl(a, LOCAL-DST!(tmp1, y), LOCAL-DST!(rcx, value))
           SET-LOCAL-BYTE(x, dst)
         SHL-OPCODE-INT :
-          val dst = shl(a, LOCAL-DST!(tmp1(), y), LOCAL-DST!(rcx(), value))
+          val dst = shl(a, LOCAL-DST!(tmp1, y), LOCAL-DST!(rcx, value))
           SET-LOCAL-INT(x, dst)
         SHL-OPCODE-LONG :
-          SET-LOCAL(x, { shl(a, LOCAL-DST!(_, y), LOCAL-DST!(rcx(), value)) })
+          SET-LOCAL(x, { shl(a, LOCAL-DST!(_, y), LOCAL-DST!(rcx, value)) })
         SHR-OPCODE-BYTE :
-          val dst = shr(a, LOCAL-BYTE-DST!(tmp1b(), y), LOCAL-DST!(rcx(), value))
+          val dst = shr(a, LOCAL-BYTE-DST!(tmp1b, y), LOCAL-DST!(rcx, value))
           SET-LOCAL-BYTE(x, gp64(dst))
         SHR-OPCODE-INT :
-          val dst = shr(a, LOCAL-INT-DST!(tmp1i(), y), LOCAL-DST!(rcx(), value))
+          val dst = shr(a, LOCAL-INT-DST!(tmp1i, y), LOCAL-DST!(rcx, value))
           SET-LOCAL-INT(x, gp64(dst))
         SHR-OPCODE-LONG :
-          SET-LOCAL(x, { shr(a, LOCAL-DST!(_, y), LOCAL-DST!(rcx(), value)) })
+          SET-LOCAL(x, { shr(a, LOCAL-DST!(_, y), LOCAL-DST!(rcx, value)) })
         ASHR-OPCODE-INT :
-          val dst = ashr(a, LOCAL-DST!(tmp1(), y), LOCAL-DST!(rcx(), value))
+          val dst = ashr(a, LOCAL-DST!(tmp1, y), LOCAL-DST!(rcx, value))
           SET-LOCAL-INT(x, dst)
         ASHR-OPCODE-LONG :
-          val dst = ashr(a, LOCAL-DST!(tmp1(), y), LOCAL-DST!(rcx(), value))
+          val dst = ashr(a, LOCAL-DST!(tmp1, y), LOCAL-DST!(rcx, value))
           SET-LOCAL(x, dst)
         LT-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i(), y), LOCAL-INT(tmp2i(), value), tmp3(), tmp3b(), set-l)
+          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-l)
           SET-LOCAL(x, res)
         LT-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-l)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-l)
           SET-LOCAL(x, res)
         LT-OPCODE-FLOAT :
-          val res = cmpf-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-b)
+          val res = cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), tmp3, tmp3b, set-b)
           SET-LOCAL(x, res)
         LT-OPCODE-DOUBLE :
-          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value), tmp3(), tmp3b(), set-b)
+          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), tmp3, tmp3b, set-b)
           SET-LOCAL(x, res)
         GT-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i(), y), LOCAL-INT(tmp2i(), value), tmp3(), tmp3b(), set-g)
+          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-g)
           SET-LOCAL(x, res)
         GT-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-g)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-g)
           SET-LOCAL(x, res)
         GT-OPCODE-FLOAT :
-          val res = cmpf-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-a)
+          val res = cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), tmp3, tmp3b, set-a)
           SET-LOCAL(x, res)
         GT-OPCODE-DOUBLE :
-          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value), tmp3(), tmp3b(), set-a)
+          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), tmp3, tmp3b, set-a)
           SET-LOCAL(x, res)
         LE-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i(), y), LOCAL-INT(tmp2i(), value), tmp3(), tmp3b(), set-le)
+          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-le)
           SET-LOCAL(x, res)
         LE-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-le)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-le)
           SET-LOCAL(x, res)
         LE-OPCODE-FLOAT :
-          val res = cmpf-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-be)
+          val res = cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), tmp3, tmp3b, set-be)
           SET-LOCAL(x, res)
         LE-OPCODE-DOUBLE :
-          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value), tmp3(), tmp3b(), set-be)
+          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), tmp3, tmp3b, set-be)
           SET-LOCAL(x, res)
         GE-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i(), y), LOCAL-INT(tmp2i(), value), tmp3(), tmp3b(), set-ge)
+          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-ge)
           SET-LOCAL(x, res)
         GE-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-ge)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-ge)
           SET-LOCAL(x, res)
         GE-OPCODE-FLOAT :
-          val res = cmpf-set(a, LOCAL-FLOAT(xmm0(), y), LOCAL-FLOAT(xmm1(), value), tmp3(), tmp3b(), set-ae)
+          val res = cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), tmp3, tmp3b, set-ae)
           SET-LOCAL(x, res)
         GE-OPCODE-DOUBLE :
-          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0(), y), LOCAL-DOUBLE(xmm1(), value), tmp3(), tmp3b(), set-ae)
+          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), tmp3, tmp3b, set-ae)
           SET-LOCAL(x, res)
         ULT-OPCODE-BYTE :
-          val res = cmp-set(a, LOCAL-BYTE(tmp1b(), y), LOCAL-BYTE(tmp2b(), value), tmp3(), tmp3b(), set-b)
+          val res = cmp-set(a, LOCAL-BYTE(tmp1b, y), LOCAL-BYTE(tmp2b, value), tmp3, tmp3b, set-b)
           SET-LOCAL(x, res)
         ULT-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i(), y), LOCAL-INT(tmp2i(), value), tmp3(), tmp3b(), set-b)
+          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-b)
           SET-LOCAL(x, res)
         ULT-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-b)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-b)
           SET-LOCAL(x, res)
         ULE-OPCODE-BYTE :
-          val res = cmp-set(a, LOCAL-BYTE(tmp1b(), y), LOCAL-BYTE(tmp2b(), value), tmp3(), tmp3b(), set-be)
+          val res = cmp-set(a, LOCAL-BYTE(tmp1b, y), LOCAL-BYTE(tmp2b, value), tmp3, tmp3b, set-be)
           SET-LOCAL(x, res)
         ULE-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i(), y), LOCAL-INT(tmp2i(), value), tmp3(), tmp3b(), set-be)
+          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-be)
           SET-LOCAL(x, res)
         ULE-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-be)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-be)
           SET-LOCAL(x, res)
         UGT-OPCODE-BYTE :
-          val res = cmp-set(a, LOCAL-BYTE(tmp1b(), y), LOCAL-BYTE(tmp2b(), value), tmp3(), tmp3b(), set-a)
+          val res = cmp-set(a, LOCAL-BYTE(tmp1b, y), LOCAL-BYTE(tmp2b, value), tmp3, tmp3b, set-a)
           SET-LOCAL(x, res)
         UGT-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i(), y), LOCAL-INT(tmp2i(), value), tmp3(), tmp3b(), set-a)
+          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-a)
           SET-LOCAL(x, res)
         UGT-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-a)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-a)
           SET-LOCAL(x, res)
         UGE-OPCODE-BYTE :
-          val res = cmp-set(a, LOCAL-BYTE(tmp1b(), y), LOCAL-BYTE(tmp2b(), value), tmp3(), tmp3b(), set-ae)
+          val res = cmp-set(a, LOCAL-BYTE(tmp1b, y), LOCAL-BYTE(tmp2b, value), tmp3, tmp3b, set-ae)
           SET-LOCAL(x, res)
         UGE-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i(), y), LOCAL-INT(tmp2i(), value), tmp3(), tmp3b(), set-ae)
+          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-ae)
           SET-LOCAL(x, res)
         UGE-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-ae)
+          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-ae)
           SET-LOCAL(x, res)
         ALLOC-OPCODE-LOCAL :
-          val num-bytes = tmp3()
+          val num-bytes = tmp3
           LOCAL-DST!(num-bytes, y)
           add(a, num-bytes, 8 + 7)
-          and-op(a, num-bytes, CONST(tmp1(), (- 8L)))
+          and-op(a, num-bytes, CONST(tmp1, (- 8L)))
           do-alloc(value, num-bytes)
         ALLOC-OPCODE-CONST :
-          do-alloc(value, CONST(tmp3(), 8 + y))
+          do-alloc(value, CONST(tmp3, 8 + y))
         else :
           fatal("MISSING C OPCODE %_" % [opcode])
 
@@ -1572,7 +1572,7 @@ public defn encode (fid:Int, func:VMFunction,
       dump-opcode(opcode-string(opcode, x, value)) when dumping-opcodes?
       switch(opcode) :
         CALLC-OPCODE-WIDE : 
-          do-callc(x, CONST(tmp1(), value))
+          do-callc(x, CONST(tmp1, value))
         SET-OPCODE-WIDE :
           SET-LOCAL(x, { mov(a, _, value) })
         SET-REG-OPCODE-WIDE :
@@ -1585,18 +1585,18 @@ public defn encode (fid:Int, func:VMFunction,
       dump-opcode(opcode-string(opcode, x, y, z, value)) when dumping-opcodes?
 
       defn store (pi:Int, ov:Int, vi:Int, size:Int) :
-        val p = LOCAL(tmp1(), pi)
-        val o = CONST(tmp2(), ov)
-        val v = LOCAL(tmp3(), vi, size)
+        val p = LOCAL(tmp1, pi)
+        val o = CONST(tmp2, ov)
+        val v = LOCAL(tmp3, vi, size)
         mov(a, MemPtr(p, o, 0, 0, size), v)
-        dump(a, "  STORE-%d %p[%d] = %p\n" CONST(rax(), size) p o v) when (debugging? or tracing?)
+        dump(a, "  STORE-%d %p[%d] = %p\n" CONST(rax, size) p o v) when (debugging? or tracing?)
 
       defn store-var (pi:Int, ii:Int, ov:Int, vi:Int, size:Int) :
-        val p = LOCAL(tmp1(), pi)
-        val i = LOCAL(tmp2(), ii)
-        val v = LOCAL(tmp3(), vi, size)
+        val p = LOCAL(tmp1, pi)
+        val i = LOCAL(tmp2, ii)
+        val v = LOCAL(tmp3, vi, size)
         mov(a, MemPtr(p, i, 0, ov, size), v)
-        dump(a, "  STORE-%d* %p[%d] = %p\n" CONST(rcx(), size) p i v) when (debugging? or tracing?)
+        dump(a, "  STORE-%d* %p[%d] = %p\n" CONST(rcx, size) p i v) when (debugging? or tracing?)
 
       switch(opcode) :
         STORE-OPCODE-1 : store(x, value, z, SIZEOF-BYTE)
@@ -1607,23 +1607,23 @@ public defn encode (fid:Int, func:VMFunction,
         STORE-OPCODE-8-VAR-OFFSET : store-var(x, y, value, z, SIZEOF-LONG)
 
         LOAD-OPCODE-1 : 
-          mov(a, tmp3(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-BYTE))
-          SET-LOCAL-BYTE(x, tmp3())
+          mov(a, tmp3, MemPtr(LOCAL(tmp1, y), CONST(tmp2, value), 0, 0, SIZEOF-BYTE))
+          SET-LOCAL-BYTE(x, tmp3)
         LOAD-OPCODE-4 : 
-          mov(a, tmp3(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-INT))
-          SET-LOCAL-INT(x, tmp3())
+          mov(a, tmp3, MemPtr(LOCAL(tmp1, y), CONST(tmp2, value), 0, 0, SIZEOF-INT))
+          SET-LOCAL-INT(x, tmp3)
         LOAD-OPCODE-8 :
-          SET-LOCAL(x, { mov(a, _, MemPtr(LOCAL(tmp2(), y), CONST(tmp3(), value), 0, 0, SIZEOF-LONG)) })
+          SET-LOCAL(x, { mov(a, _, MemPtr(LOCAL(tmp2, y), CONST(tmp3, value), 0, 0, SIZEOF-LONG)) })
         LOAD-OPCODE-1-VAR-OFFSET :
-          xor-op(a, tmp3(), tmp3())
-          mov(a, tmp3(), MemPtr(LOCAL(tmp2(), y), LOCAL(tmp1(), z), 0, value, SIZEOF-BYTE))
-          SET-LOCAL-BYTE(x, tmp3())
+          xor-op(a, tmp3, tmp3)
+          mov(a, tmp3, MemPtr(LOCAL(tmp2, y), LOCAL(tmp1, z), 0, value, SIZEOF-BYTE))
+          SET-LOCAL-BYTE(x, tmp3)
         LOAD-OPCODE-4-VAR-OFFSET :
-          xor-op(a, tmp3(), tmp3())
-          mov(a, tmp3(), MemPtr(LOCAL(tmp2(), y), LOCAL(tmp1(), z), 0, value, SIZEOF-INT))
-          SET-LOCAL-INT(x, tmp3())
+          xor-op(a, tmp3, tmp3)
+          mov(a, tmp3, MemPtr(LOCAL(tmp2, y), LOCAL(tmp1, z), 0, value, SIZEOF-INT))
+          SET-LOCAL-INT(x, tmp3)
         LOAD-OPCODE-8-VAR-OFFSET :
-          SET-LOCAL(x, { mov(a, _, MemPtr(LOCAL(tmp2(), y), LOCAL(tmp3(), z), 0, value, SIZEOF-LONG)) })
+          SET-LOCAL(x, { mov(a, _, MemPtr(LOCAL(tmp2, y), LOCAL(tmp3, z), 0, value, SIZEOF-LONG)) })
         else :
           fatal("MISSING E OPCODE %_" % [opcode])
 
@@ -1634,7 +1634,7 @@ public defn encode (fid:Int, func:VMFunction,
       jmp(a, n2)
 
     defn jump-op (x:Int, y:Int, f:(Assembler, Label) -> False, cmp:(Assembler, Gp, Gp) -> False, n1:Label, n2:Label) :
-      jump-op-reg(LOCAL(tmp1(), x), LOCAL(tmp2(), y), f, cmp, n1, n2)
+      jump-op-reg(LOCAL(tmp1, x), LOCAL(tmp2, y), f, cmp, n1, n2)
 
     defn jump-op-xmm (x:Xmm, y:Xmm, f:(Assembler, Label) -> ?, cmp:(Assembler, Xmm, Xmm) -> False, n1:Label, n2:Label) :
       cmp(a, x, y)
@@ -1642,30 +1642,30 @@ public defn encode (fid:Int, func:VMFunction,
       jmp(a, n2)
 
     defn jump-float-op (x:Int, y:Int, f:(Assembler, Label) -> False, n1:Label, n2:Label) :
-      jump-op-xmm(LOCAL-FLOAT(xmm0(), x), LOCAL-FLOAT(xmm1(), y), f, ucomiss, n1, n2)
+      jump-op-xmm(LOCAL-FLOAT(xmm0, x), LOCAL-FLOAT(xmm1, y), f, ucomiss, n1, n2)
 
     defn jump-double-op (x:Int, y:Int, f:(Assembler, Label) -> False, n1:Label, n2:Label) :
-      jump-op-xmm(LOCAL-DOUBLE(xmm0(), x), LOCAL-DOUBLE(xmm1(), y), f, ucomisd, n1, n2)
+      jump-op-xmm(LOCAL-DOUBLE(xmm0, x), LOCAL-DOUBLE(xmm1, y), f, ucomisd, n1, n2)
 
     defn emit-ins-f (opcode:Int, x:Int, y:Int, n1:Label, n2:Label) :
       trace-opcode(opcode, opcode-string(opcode, x, y, n1, n2)) when tracing?
       dump-opcode(opcode-string(opcode, x, y, n1, n2)) when dumping-opcodes?
       switch(opcode) :
         JUMP-TAGBITS-OPCODE :
-          val bits = and-op(a, LOCAL-DST!(tmp1(), x), 0x7)
+          val bits = and-op(a, LOCAL-DST!(tmp1, x), 0x7)
           cmp(a, bits, y)
           je(a, n1)
           jmp(a, n2)
         JUMP-TAGWORD-OPCODE :
-          val obj = LOCAL(tmp1(), x) ; OBJ
-          and-op(a, LOCAL-DST!(tmp2(), x), 7) ; TAGBITS
-          val tag = LOCAL(tmp3(), y) ; TAG
-          cmp(a, tmp2(), 1) ; tagbits == 1
+          val obj = LOCAL(tmp1, x) ; OBJ
+          and-op(a, LOCAL-DST!(tmp2, x), 7) ; TAGBITS
+          val tag = LOCAL(tmp3, y) ; TAG
+          cmp(a, tmp2, 1) ; tagbits == 1
           jne(a, n2)
-          mov(a, tmp1(), MemPtr(obj, -1, SIZEOF-INT)) ; *p = *((int*)(obj - 1))
-          jump-op-reg(tmp1(), tag, je, cmp, n1, n2)   ; *p == tag
+          mov(a, tmp1, MemPtr(obj, -1, SIZEOF-INT)) ; *p = *((int*)(obj - 1))
+          jump-op-reg(tmp1, tag, je, cmp, n1, n2)   ; *p == tag
         JUMP-SET-OPCODE :
-          jump-op-reg(LOCAL(tmp1(), x), CONST(tmp2(), 0), jne, cmp, n1, n2)
+          jump-op-reg(LOCAL(tmp1, x), CONST(tmp2, 0), jne, cmp, n1, n2)
         JUMP-INT-LT-OPCODE :
           jump-op(x, y, jl, cmp, n1, n2)
         JUMP-INT-GT-OPCODE :
@@ -1677,9 +1677,9 @@ public defn encode (fid:Int, func:VMFunction,
         JUMP-EQ-OPCODE-REF :
           jump-op(x, y, je, cmp, n1, n2)
         JUMP-EQ-OPCODE-BYTE :
-          jump-op-reg(LOCAL-BYTE(tmp1b(), x), LOCAL-BYTE(tmp2b(), y), je, cmp, n1, n2)
+          jump-op-reg(LOCAL-BYTE(tmp1b, x), LOCAL-BYTE(tmp2b, y), je, cmp, n1, n2)
         JUMP-EQ-OPCODE-INT :
-          jump-op-reg(LOCAL-INT(tmp1i(), x), LOCAL-INT(tmp2i(), y), je, cmp, n1, n2)
+          jump-op-reg(LOCAL-INT(tmp1i, x), LOCAL-INT(tmp2i, y), je, cmp, n1, n2)
         JUMP-EQ-OPCODE-LONG :
           jump-op(x, y, je, cmp, n1, n2)
         JUMP-EQ-OPCODE-FLOAT :
@@ -1689,9 +1689,9 @@ public defn encode (fid:Int, func:VMFunction,
         JUMP-NE-OPCODE-REF :
           jump-op(x, y, jne, cmp, n1, n2)
         JUMP-NE-OPCODE-BYTE :
-          jump-op-reg(LOCAL-BYTE(tmp1b(), x), LOCAL-BYTE(tmp2b(), y), jne, cmp, n1, n2)
+          jump-op-reg(LOCAL-BYTE(tmp1b, x), LOCAL-BYTE(tmp2b, y), jne, cmp, n1, n2)
         JUMP-NE-OPCODE-INT :
-          jump-op-reg(LOCAL-INT(tmp1i(), x), LOCAL-INT(tmp2i(), y), jne, cmp, n1, n2)
+          jump-op-reg(LOCAL-INT(tmp1i, x), LOCAL-INT(tmp2i, y), jne, cmp, n1, n2)
         JUMP-NE-OPCODE-LONG :
           jump-op(x, y, jne, cmp, n1, n2)
         JUMP-NE-OPCODE-FLOAT :
@@ -1699,7 +1699,7 @@ public defn encode (fid:Int, func:VMFunction,
         JUMP-NE-OPCODE-DOUBLE :
           jump-double-op(x, y, jne, n1, n2)
         JUMP-LT-OPCODE-INT :
-          jump-op-reg(LOCAL-INT(tmp1i(), x), LOCAL-INT(tmp2i(), y), jl, cmp, n1, n2)
+          jump-op-reg(LOCAL-INT(tmp1i, x), LOCAL-INT(tmp2i, y), jl, cmp, n1, n2)
         JUMP-LT-OPCODE-LONG :
           jump-op(x, y, jl, cmp, n1, n2)
         JUMP-LT-OPCODE-FLOAT :
@@ -1707,7 +1707,7 @@ public defn encode (fid:Int, func:VMFunction,
         JUMP-LT-OPCODE-DOUBLE :
           jump-double-op(x, y, jb, n1, n2)
         JUMP-GT-OPCODE-INT :
-          jump-op-reg(LOCAL-INT(tmp1i(), x), LOCAL-INT(tmp2i(), y), jg, cmp, n1, n2)
+          jump-op-reg(LOCAL-INT(tmp1i, x), LOCAL-INT(tmp2i, y), jg, cmp, n1, n2)
         JUMP-GT-OPCODE-LONG :
           jump-op(x, y, jg, cmp, n1, n2)
         JUMP-GT-OPCODE-FLOAT :
@@ -1715,7 +1715,7 @@ public defn encode (fid:Int, func:VMFunction,
         JUMP-GT-OPCODE-DOUBLE :
           jump-double-op(x, y, ja, n1, n2)
         JUMP-LE-OPCODE-INT :
-          jump-op-reg(LOCAL-INT(tmp1i(), x), LOCAL-INT(tmp2i(), y), jle, cmp, n1, n2)
+          jump-op-reg(LOCAL-INT(tmp1i, x), LOCAL-INT(tmp2i, y), jle, cmp, n1, n2)
         JUMP-LE-OPCODE-LONG :
           jump-op(x, y, jle, cmp, n1, n2)
         JUMP-LE-OPCODE-FLOAT :
@@ -1723,7 +1723,7 @@ public defn encode (fid:Int, func:VMFunction,
         JUMP-LE-OPCODE-DOUBLE :
           jump-double-op(x, y, jbe, n1, n2)
         JUMP-GE-OPCODE-INT :
-          jump-op-reg(LOCAL-INT(tmp1i(), x), LOCAL-INT(tmp2i(), y), jge, cmp, n1, n2)
+          jump-op-reg(LOCAL-INT(tmp1i, x), LOCAL-INT(tmp2i, y), jge, cmp, n1, n2)
         JUMP-GE-OPCODE-LONG :
           jump-op(x, y, jge, cmp, n1, n2)
         JUMP-GE-OPCODE-FLOAT :
@@ -1731,27 +1731,27 @@ public defn encode (fid:Int, func:VMFunction,
         JUMP-GE-OPCODE-DOUBLE :
           jump-double-op(x, y, jae, n1, n2)
         JUMP-ULT-OPCODE-BYTE :
-          jump-op-reg(LOCAL-BYTE(tmp1b(), x), LOCAL-BYTE(tmp2b(), y), jb, cmp, n1, n2)
+          jump-op-reg(LOCAL-BYTE(tmp1b, x), LOCAL-BYTE(tmp2b, y), jb, cmp, n1, n2)
         JUMP-ULT-OPCODE-INT :
-          jump-op-reg(LOCAL-INT(tmp1i(), x), LOCAL-INT(tmp2i(), y), jb, cmp, n1, n2)
+          jump-op-reg(LOCAL-INT(tmp1i, x), LOCAL-INT(tmp2i, y), jb, cmp, n1, n2)
         JUMP-ULT-OPCODE-LONG :
           jump-op(x, y, jb, cmp, n1, n2)
         JUMP-ULE-OPCODE-BYTE :
-          jump-op-reg(LOCAL-BYTE(tmp1b(), x), LOCAL-BYTE(tmp2b(), y), jbe, cmp, n1, n2)
+          jump-op-reg(LOCAL-BYTE(tmp1b, x), LOCAL-BYTE(tmp2b, y), jbe, cmp, n1, n2)
         JUMP-ULE-OPCODE-INT :
-          jump-op-reg(LOCAL-INT(tmp1i(), x), LOCAL-INT(tmp2i(), y), jbe, cmp, n1, n2)
+          jump-op-reg(LOCAL-INT(tmp1i, x), LOCAL-INT(tmp2i, y), jbe, cmp, n1, n2)
         JUMP-ULE-OPCODE-LONG :
           jump-op(x, y, jbe, cmp, n1, n2)
         JUMP-UGT-OPCODE-BYTE :
-          jump-op-reg(LOCAL-BYTE(tmp1b(), x), LOCAL-BYTE(tmp2b(), y), ja, cmp, n1, n2)
+          jump-op-reg(LOCAL-BYTE(tmp1b, x), LOCAL-BYTE(tmp2b, y), ja, cmp, n1, n2)
         JUMP-UGT-OPCODE-INT :
-          jump-op-reg(LOCAL-INT(tmp1i(), x), LOCAL-INT(tmp2i(), y), ja, cmp, n1, n2)
+          jump-op-reg(LOCAL-INT(tmp1i, x), LOCAL-INT(tmp2i, y), ja, cmp, n1, n2)
         JUMP-UGT-OPCODE-LONG :
           jump-op(x, y, ja, cmp, n1, n2)
         JUMP-UGE-OPCODE-BYTE :
-          jump-op-reg(LOCAL-BYTE(tmp1b(), x), LOCAL-BYTE(tmp2b(), y), jae, cmp, n1, n2)
+          jump-op-reg(LOCAL-BYTE(tmp1b, x), LOCAL-BYTE(tmp2b, y), jae, cmp, n1, n2)
         JUMP-UGE-OPCODE-INT :
-          jump-op-reg(LOCAL-INT(tmp1i(), x), LOCAL-INT(tmp2i(), y), jae, cmp, n1, n2)
+          jump-op-reg(LOCAL-INT(tmp1i, x), LOCAL-INT(tmp2i, y), jae, cmp, n1, n2)
         JUMP-UGE-OPCODE-LONG :
           jump-op(x, y, jae, cmp, n1, n2)
         else : 
@@ -1908,17 +1908,17 @@ public defn encode (fid:Int, func:VMFunction,
 
       defn before-call-dump (entry:False|StackTraceEntry) :
         match(entry:StackTraceEntry) :
-          dump(a, ">>> %s\n", CONST(rax(), printf-format(to-string(entry)))) when (debugging? or tracing?)
+          dump(a, ">>> %s\n", CONST(rax, printf-format(to-string(entry)))) when (debugging? or tracing?)
 
       defn jit-simple-callc (ins:CallCIns, records:CallCRecords) :
-        ; dump(a, "CALLC %d %d\n", CONST(tmp1(), num-int-args(records)), CONST(tmp2(), num-real-args(records)))
+        ; dump(a, "CALLC %d %d\n", CONST(tmp1, num-int-args(records)), CONST(tmp2, num-real-args(records)))
         println(JIT-LOG-FILE, "CALLC %_ %_" % [num-int-args(records), num-real-args(records)])
 
         before-call-dump(trace-entry(ins))
 
         ; TEMPORARIES
-        val t1 = rax() ; NOT USED IN ARGS FOR CALLING
-        val t2 = r12() ; HAS FUNCTIONS IN IT WHICH IS NOT USED AND NOT SAVED AND NOT ARG
+        val t1 = rax ; NOT USED IN ARGS FOR CALLING
+        val t2 = r12 ; HAS FUNCTIONS IN IT WHICH IS NOT USED AND NOT SAVED AND NOT ARG
         
         push(a, t2)
         
@@ -1935,10 +1935,10 @@ public defn encode (fid:Int, func:VMFunction,
           val v = value(arg) as StdArg|ShadowArg
           val y = ys(ins)[index(v)]
           match(loc(arg)) :
-            (loc:RegLoc) :  imm-to-reg(c-params()[index(loc)], y, true)
-            (loc:FRegLoc) : mov(a, c-float-params()[index(loc)], imm-to-reg(rax(), y, false)) ;TODO: NICE TO STORE DIRECTLY IN REG
+            (loc:RegLoc) :  imm-to-reg(c-params[index(loc)], y, true)
+            (loc:FRegLoc) : mov(a, c-float-params[index(loc)], imm-to-reg(rax, y, false)) ;TODO: NICE TO STORE DIRECTLY IN REG
 
-        mov(a, rax(), num-real-args(records)) ;Set number of real args
+        mov(a, rax, num-real-args(records)) ;Set number of real args
         
         val f = match(f(ins)) :
           (f:Local) :    LOCAL(t2, slot(f))
@@ -1963,9 +1963,9 @@ public defn encode (fid:Int, func:VMFunction,
           match(x:Local) :
             match(return(records)) :
               (l:RegLoc) :
-                SET-LOCAL(slot(x), rax())         ;TODO: MOVE RAX OUT OF HERE
+                SET-LOCAL(slot(x), rax)         ;TODO: MOVE RAX OUT OF HERE
               (l:FRegLoc) :
-                SET-LOCAL-DOUBLE(slot(x), xmm0()) ;TODO: MOVE XMM0 OUT OF HERE
+                SET-LOCAL-DOUBLE(slot(x), xmm0) ;TODO: MOVE XMM0 OUT OF HERE
 
       ;Encode each instruction
       defn emit-ins (ins:VMIns) :
