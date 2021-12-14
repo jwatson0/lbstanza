@@ -30,13 +30,13 @@ public var JIT-LOG-FILE:FileOutputStream = STANDARD-OUTPUT-STREAM as FileOutputS
 
 ;Configuration
 
-val local-regs? = true       ;Use x86 registers for first few vm locals?
-val reg-regs? = true         ;Use x86 registers for first few vm registers?
-val debugging? = false       ;General debugging output?
-val tracing? = false         ;Tracing execution of vm instructions and writes?
-val jit-callc? = true        ;JIT simple callc invocations?
-val disassembling? = true    ;Disassemble JITd code?
-val dumping-opcodes? = true  ;Dumping opcodes within disassembled code
+val local-regs? = true        ;Use x86 registers for first few vm locals?
+val reg-regs? = true          ;Use x86 registers for first few vm registers?
+val debugging? = false        ;General debugging output?
+val tracing? = false          ;Tracing execution of vm instructions and writes?
+val jit-callc? = true         ;JIT simple callc invocations?
+val disassembling? = false    ;Disassemble JITd code?
+val dumping-opcodes? = false  ;Dumping opcodes within disassembled code
 
 ;Resolver api and structures
 
@@ -535,6 +535,14 @@ defn do-SET-REG (a:Assembler, r:Int, v:Gp, mem-only?:True|False) -> False :
   mov(a, reg-access(r, mem-only?), v)
   dump(a, "  SET-REG[%d,%d] = %p\n", CONST(a, rcx(), r), CONST(a, rax(), 1 when mem-only? else 0), v) when tracing?
   false
+defn do-SET-REG (a:Assembler, r:Int, v:Gp -> Gp, mem-only?:True|False) -> False :
+  ; val rv = (mov(a, reg-access(r, mem-only?), v(tmp1())), tmp1())
+  val rv = match(reg-access(r, mem-only?)) :
+    (acc:Gp)     : v(acc)
+    (acc:MemPtr) : (mov(a, acc, v(tmp1())), tmp1())
+  ; mov(a, reg-access(r, mem-only?), v)
+  dump(a, "  SET-REG[%d,%d] = %p\n", CONST(a, rcx(), r), CONST(a, rax(), 1 when mem-only? else 0), rv) when tracing?
+  false
 
 ;Save/Restore to VMState
 defn SAVE-STATE-ONLY (a:Assembler) :
@@ -705,6 +713,8 @@ public defn encode (fid:Int, func:VMFunction,
       do-SET-REG(a, r, v, mem-only?)
     defn SET-REG (r:Int, v:Gp) -> False :
       SET-REG(r, v, MEM-REG-ONLY?)
+    defn SET-REG (r:Int, v:Gp -> Gp) -> False :
+      do-SET-REG(a, r, v, MEM-REG-ONLY?)
     defn SET-REG-INT (r:Int, v:Gp, mem-only?:True|False) -> False :
       movsxd(a, v, v)
       SET-REG(r, v, mem-only?)
@@ -724,9 +734,18 @@ public defn encode (fid:Int, func:VMFunction,
 
     ;Local setters
     
-    defn SET-LOCAL (l:Int, v:Gp) :
+    defn SET-LOCAL (l:Int, v:Gp) -> False :
       mov(a, local-access(l), v)
       dump(a, "  SET-LOCAL[%d] = %p\n", CONST(rax(), l), v) when (debugging? or tracing?)
+      false
+    defn SET-LOCAL (l:Int, v:Gp -> Gp) -> False :
+      ; val r = (mov(a, local-access(l), v(tmp1())), tmp1())
+      val r = match(local-access(l)) :
+        (acc:Gp)     : v(acc)
+        (acc:MemPtr) : (mov(a, acc, v(tmp1())), tmp1())
+      ; mov(a, local-access(l), v)
+      dump(a, "  SET-LOCAL[%d] = %p\n", CONST(rax(), l), r) when (debugging? or tracing?)
+      false
     defn SET-LOCAL-BYTE (l:Int, v:Gp) :
       and-op(a, v, 0xff)
       SET-LOCAL(l, v)
@@ -1023,14 +1042,11 @@ public defn encode (fid:Int, func:VMFunction,
           mov(a, tmp1b(), LOCAL-BYTE(tmp1b(), value))
           SET-LOCAL(x, tmp1())
         CONV-OPCODE-LONG-INT :
-          movsxd(a, tmp2(), LOCAL-INT(tmp1i(), value))
-          SET-LOCAL(x, tmp2())
+          SET-LOCAL(x, { movsxd(a, _, LOCAL-INT(tmp2i(), value)) })
         CONV-OPCODE-LONG-FLOAT :
-          cvtss2si(a, tmp2(), LOCAL-FLOAT(xmm0(), value))
-          SET-LOCAL(x, tmp2())
+          SET-LOCAL(x, { cvtss2si(a, _, LOCAL-FLOAT(xmm0(), value)) })
         CONV-OPCODE-LONG-DOUBLE :
-          cvtsd2si(a, tmp2(), LOCAL-DOUBLE(xmm0(), value))
-          SET-LOCAL(x, tmp2())
+          SET-LOCAL(x, { cvtsd2si(a, _, LOCAL-DOUBLE(xmm0(), value)) })
         CONV-OPCODE-FLOAT-BYTE :
           cvtsi2ss(a, xmm0(), LOCAL-BYTE(tmp1b(), value))
           SET-LOCAL-FLOAT(x, xmm0())
@@ -1056,20 +1072,15 @@ public defn encode (fid:Int, func:VMFunction,
           cvtss2sd(a, xmm1(), LOCAL-FLOAT(xmm0(), value))
           SET-LOCAL-DOUBLE(x, xmm1())
         TAG-OPCODE-BYTE :
-          TAG(tmp2(), LOCAL(tmp1(), value), BYTE-TAG-BITS)
-          SET-LOCAL(x, tmp2())
+          SET-LOCAL(x, { TAG(_, LOCAL(tmp2(), value), BYTE-TAG-BITS) })
         TAG-OPCODE-CHAR :
-          TAG(tmp2(), LOCAL(tmp1(), value), CHAR-TAG-BITS)
-          SET-LOCAL(x, tmp2())
+          SET-LOCAL(x, { TAG(_, LOCAL(tmp2(), value), CHAR-TAG-BITS) })
         TAG-OPCODE-INT :
-          TAG(tmp2(), LOCAL(tmp1(), value), INT-TAG-BITS)
-          SET-LOCAL(x, tmp2())
+          SET-LOCAL(x, { TAG(_, LOCAL(tmp2(), value), INT-TAG-BITS) })
         TAG-OPCODE-FLOAT :
-          TAG(tmp2(), LOCAL(tmp1(), value), FLOAT-TAG-BITS)
-          SET-LOCAL(x, tmp2())
+          SET-LOCAL(x, { TAG(_, LOCAL(tmp2(), value), FLOAT-TAG-BITS) })
         DETAG-OPCODE :
-          DETAG(tmp2(), LOCAL(tmp1(), value))
-          SET-LOCAL(x, tmp2())
+          SET-LOCAL(x, { DETAG(_, LOCAL(tmp2(), value)) })
         DEREF-OPCODE :
           val ref = LOCAL-DST!(tmp2(), value)
           add(a, ref, 8 - REF-TAG-BITS)
@@ -1089,7 +1100,7 @@ public defn encode (fid:Int, func:VMFunction,
         COLLECT-STACK-TRACE-OPCODE :
           SET-LOCAL(x, call-collect-stack-trace(a, vmstate(), LOCAL(tmp1(), value)))
         GET-REG-OPCODE :
-          SET-LOCAL(x, GET-REG(tmp1(), value))
+          SET-LOCAL(x, { GET-REG(_, value) })
         else :
           fatal("MISSING B OPCODE %_" % [opcode])
 
@@ -1141,38 +1152,37 @@ public defn encode (fid:Int, func:VMFunction,
           read-dispatch-table(a, tmp3(), vmstate(), CONST(tmp2(), value))
           SET-LOCAL(x, tmp3())
         SET-REG-OPCODE-LOCAL :
-          SET-REG(x, LOCAL(tmp2(), value), MEM-REG-ONLY?)
+          SET-REG(x, { LOCAL-DST!(_, value) })
         SET-REG-OPCODE-UNSIGNED :
-          mov(a, tmp1(), to-long(value) & 0xffffffffL)
-          SET-REG(x, tmp1())
+          SET-REG(x, { mov(a, _, to-long(value) & 0xffffffffL) })
         SET-REG-OPCODE-WIDE :
-          SET-REG(x, CONST(tmp1(), value))
+          SET-REG(x, { mov(a, _, value) })
         SET-REG-OPCODE-CODE :
-          SET-REG(x, CONST(tmp1(), value))
+          SET-REG(x, { mov(a, _, value) })
         SET-REG-OPCODE-GLOBAL :
-          SET-REG(x, get-global(tmp1(), value))
+          SET-REG(x, { get-global(_, value) })
         SET-REG-OPCODE-DATA :
-          SET-REG(x, get-data(tmp1(), value))
+          SET-REG(x, { get-data(_, value) })
         SET-REG-OPCODE-CONST :
-          SET-REG(x, get-const(tmp1(), value))
+          SET-REG(x, { get-const(_, value) })
         SET-REG-OPCODE-UNSIGNED :
-          SET-REG(x, CONST(tmp1(), value))
+          SET-REG(x, { mov(a, _, value) })
         SET-REG-OPCODE-SIGNED :
           SET-REG-INT(x, CONST(tmp1(), value))
         SET-OPCODE-LOCAL :
-          SET-LOCAL(x, LOCAL(tmp2(), value)) when x != value
+          SET-LOCAL(x, { LOCAL-DST!(_, value) }) when x != value
         SET-OPCODE-UNSIGNED :
-          SET-LOCAL(x, CONST(tmp1(), value))
+          SET-LOCAL(x, { mov(a, _, value) })
         SET-OPCODE-WIDE :
-          SET-LOCAL(x, CONST(tmp1(), value))
+          SET-LOCAL(x, { mov(a, _, value) })
         SET-OPCODE-CODE :
-          SET-LOCAL(x, CONST(tmp1(), value))
+          SET-LOCAL(x, { mov(a, _, value) })
         SET-OPCODE-GLOBAL :
-          SET-LOCAL(x, get-global(tmp1(), value))
+          SET-LOCAL(x, { get-global(_, value) })
         SET-OPCODE-DATA :
-          SET-LOCAL(x, get-data(tmp1(), value))
+          SET-LOCAL(x, { get-data(_, value) })
         SET-OPCODE-CONST :
-          SET-LOCAL(x, get-const(tmp2(), value))
+          SET-LOCAL(x, { get-const(_, value) })
         else :
           fatal("MISSING C OPCODE %_" % [opcode])
 
@@ -1184,8 +1194,8 @@ public defn encode (fid:Int, func:VMFunction,
         cmp(a, tmp2(), heap-limit(rax()))
         jle(a, x)
         SET-REG(0, BOOLREF(CONST(tmp1(), 0)))
-        SET-REG(1, CONST(tmp1(), 1L))
-        SET-REG(2, size)
+        SET-REG(1, { mov(a, _, 1L) })
+        SET-REG(2, { mov(a, _, size) })
         mov(a, tmp2(), MemPtr(functions(), SIZEOF-LONG * EXTEND-HEAP-FN))
         val end-label = new-label(a)
         PUSH-FRAME(num-locals, end-label)
@@ -1235,16 +1245,14 @@ public defn encode (fid:Int, func:VMFunction,
         val top = tmp2()
         heap-top(top)
         mov(a, MemPtr(top, 0), CONST(tmp1(), value))
-        SET-LOCAL(x, ptr-to-ref(tmp1(), top))
+        SET-LOCAL(x, { ptr-to-ref(_, top) })
         add(a, top, num-bytes)
         set-heap-top(a, top)
       switch(opcode) :
         INT-ADD-OPCODE :
-          val dst = add(a, LOCAL-DST!(tmp1(), y), LOCAL(tmp2(), value))
-          SET-LOCAL(x, dst)
+          SET-LOCAL(x, { add(a, LOCAL-DST!(_, y), LOCAL(tmp2(), value)) })
         INT-SUB-OPCODE :
-          val dst = sub(a, LOCAL-DST!(tmp1(), y), LOCAL(tmp2(), value))
-          SET-LOCAL(x, dst)
+          SET-LOCAL(x, { sub(a, LOCAL-DST!(_, y), LOCAL(tmp2(), value)) })
         INT-MUL-OPCODE :
           shr(a, LOCAL-DST!(tmp1(), y), 32)
           imul(a, tmp1(), LOCAL(tmp2(), value))
@@ -1261,30 +1269,28 @@ public defn encode (fid:Int, func:VMFunction,
           div(a, LOCAL(tmp2(), value))
           SET-LOCAL(x, rdx())
         INT-AND-OPCODE :
-          val dst = and-op(a, LOCAL-DST!(tmp1(), y), LOCAL(tmp2(), value))
-          SET-LOCAL(x, dst)
+          SET-LOCAL(x, { and-op(a, LOCAL-DST!(_, y), LOCAL(tmp2(), value)) })
         INT-OR-OPCODE :
-          val dst = or-op(a, LOCAL-DST!(tmp1(), y), LOCAL(tmp2(), value))
-          SET-LOCAL(x, dst)
+          SET-LOCAL(x, { or-op(a, LOCAL-DST!(_, y), LOCAL(tmp2(), value)) })
         INT-XOR-OPCODE :
-          val dst = xor-op(a, LOCAL-DST!(tmp1(), y), LOCAL(tmp2(), value))
-          SET-LOCAL(x, dst)
+          SET-LOCAL(x, { xor-op(a, LOCAL-DST!(_, y), LOCAL(tmp2(), value)) })
         INT-SHL-OPCODE :
           shr(a, LOCAL-DST!(rcx(), value), 32) 
-          shl(a, LOCAL-DST!(tmp1(), y), rcx())
-          SET-LOCAL(x, tmp1())
+          SET-LOCAL(x, { shl(a, LOCAL-DST!(_, y), rcx()) })
         INT-SHR-OPCODE :
-          shr(a, LOCAL-DST!(rcx(), value), 32)
-          shr(a, LOCAL-DST!(tmp1(), y), rcx())
-          shr(a, tmp1(), 32)
-          shl(a, tmp1(), 32)
-          SET-LOCAL(x, tmp1())
+          defn shift (dst:Gp) -> Gp :
+            shr(a, LOCAL-DST!(rcx(), value), 32)
+            shr(a, LOCAL-DST!(dst, y), rcx())
+            shr(a, dst, 32)
+            shl(a, dst, 32)
+          SET-LOCAL(x, shift)
         INT-ASHR-OPCODE :
-          shr(a, LOCAL-DST!(rcx(), value), 32)
-          ashr(a, LOCAL-DST!(tmp1(), y), rcx())
-          shr(a, tmp1(), 32)
-          shl(a, tmp1(), 32)
-          SET-LOCAL(x, tmp1())
+          defn shift (dst:Gp) -> Gp :
+            shr(a, LOCAL-DST!(rcx(), value), 32)
+            ashr(a, LOCAL-DST!(dst, y), rcx())
+            shr(a, dst, 32)
+            shl(a, dst, 32)
+          SET-LOCAL(x, shift)
         INT-LT-OPCODE :
           val res = cmp-set(a, LOCAL(tmp1(), y), LOCAL(tmp2(), value), tmp3(), tmp3b(), set-l)
           SET-LOCAL(x, BOOLREF(res))
@@ -1376,8 +1382,7 @@ public defn encode (fid:Int, func:VMFunction,
           val dst = imul(a, LOCAL-INT-DST!(tmp1i(), y), LOCAL-INT(tmp2i(), value))
           SET-LOCAL-INT(x, gp64(dst))
         MUL-OPCODE-LONG :
-          val dst = imul(a, LOCAL-DST!(tmp3(), y), LOCAL(tmp2(), value))
-          SET-LOCAL(x, dst)
+          SET-LOCAL(x, { imul(a, LOCAL-DST!(_, y), LOCAL(tmp2(), value)) })
         MUL-OPCODE-FLOAT :
           val dst = mulss(a, LOCAL-FLOAT-DST!(xmm0(), y), LOCAL-FLOAT(xmm1(), value))
           SET-LOCAL-FLOAT(x, dst)
@@ -1427,8 +1432,7 @@ public defn encode (fid:Int, func:VMFunction,
           val dst = and-op(a, LOCAL-INT-DST!(tmp1i(), y), LOCAL-INT(tmp2i(), value))
           SET-LOCAL-INT(x, gp64(dst))
         AND-OPCODE-LONG :
-          val dst = and-op(a, LOCAL-DST!(tmp1(), y), LOCAL(tmp2(), value))
-          SET-LOCAL(x, dst)
+          SET-LOCAL(x, { and-op(a, LOCAL-DST!(_, y), LOCAL(tmp2(), value)) })
         OR-OPCODE-BYTE :
           val dst = or-op(a, LOCAL-BYTE-DST!(tmp1b(), y), LOCAL-BYTE(tmp2b(), value))
           SET-LOCAL-BYTE(x, gp64(dst))
@@ -1445,8 +1449,7 @@ public defn encode (fid:Int, func:VMFunction,
           val dst = xor-op(a, LOCAL-INT-DST!(tmp1i(), y), LOCAL-INT(tmp2i(), value))
           SET-LOCAL-INT(x, gp64(dst))
         XOR-OPCODE-LONG :
-          val dst = xor-op(a, LOCAL-DST!(tmp1(), y), LOCAL(tmp2(), value))
-          SET-LOCAL(x, dst)
+          SET-LOCAL(x, { xor-op(a, LOCAL-DST!(_, y), LOCAL(tmp2(), value)) })
         SHL-OPCODE-BYTE :
           val dst = shl(a, LOCAL-DST!(tmp1(), y), LOCAL-DST!(rcx(), value))
           SET-LOCAL-BYTE(x, dst)
@@ -1454,8 +1457,7 @@ public defn encode (fid:Int, func:VMFunction,
           val dst = shl(a, LOCAL-DST!(tmp1(), y), LOCAL-DST!(rcx(), value))
           SET-LOCAL-INT(x, dst)
         SHL-OPCODE-LONG :
-          val dst = shl(a, LOCAL-DST!(tmp1(), y), LOCAL-DST!(rcx(), value))
-          SET-LOCAL(x, dst)
+          SET-LOCAL(x, { shl(a, LOCAL-DST!(_, y), LOCAL-DST!(rcx(), value)) })
         SHR-OPCODE-BYTE :
           val dst = shr(a, LOCAL-BYTE-DST!(tmp1b(), y), LOCAL-DST!(rcx(), value))
           SET-LOCAL-BYTE(x, gp64(dst))
@@ -1463,8 +1465,7 @@ public defn encode (fid:Int, func:VMFunction,
           val dst = shr(a, LOCAL-INT-DST!(tmp1i(), y), LOCAL-DST!(rcx(), value))
           SET-LOCAL-INT(x, gp64(dst))
         SHR-OPCODE-LONG :
-          val dst = shr(a, LOCAL-DST!(tmp1(), y), LOCAL-DST!(rcx(), value))
-          SET-LOCAL(x, dst)
+          SET-LOCAL(x, { shr(a, LOCAL-DST!(_, y), LOCAL-DST!(rcx(), value)) })
         ASHR-OPCODE-INT :
           val dst = ashr(a, LOCAL-DST!(tmp1(), y), LOCAL-DST!(rcx(), value))
           SET-LOCAL-INT(x, dst)
@@ -1573,9 +1574,9 @@ public defn encode (fid:Int, func:VMFunction,
         CALLC-OPCODE-WIDE : 
           do-callc(x, CONST(tmp1(), value))
         SET-OPCODE-WIDE :
-          SET-LOCAL(x, CONST(tmp1(), value))
+          SET-LOCAL(x, { mov(a, _, value) })
         SET-REG-OPCODE-WIDE :
-          SET-REG(x, CONST(tmp1(), value))
+          SET-REG(x, { mov(a, _, value) })
         else :
           fatal("MISSING D OPCODE %_" % [opcode])
 
@@ -1612,8 +1613,7 @@ public defn encode (fid:Int, func:VMFunction,
           mov(a, tmp3(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-INT))
           SET-LOCAL-INT(x, tmp3())
         LOAD-OPCODE-8 :
-          mov(a, tmp3(), MemPtr(LOCAL(tmp1(), y), CONST(tmp2(), value), 0, 0, SIZEOF-LONG))
-          SET-LOCAL(x, tmp3())
+          SET-LOCAL(x, { mov(a, _, MemPtr(LOCAL(tmp2(), y), CONST(tmp3(), value), 0, 0, SIZEOF-LONG)) })
         LOAD-OPCODE-1-VAR-OFFSET :
           xor-op(a, tmp3(), tmp3())
           mov(a, tmp3(), MemPtr(LOCAL(tmp2(), y), LOCAL(tmp1(), z), 0, value, SIZEOF-BYTE))
@@ -1623,8 +1623,7 @@ public defn encode (fid:Int, func:VMFunction,
           mov(a, tmp3(), MemPtr(LOCAL(tmp2(), y), LOCAL(tmp1(), z), 0, value, SIZEOF-INT))
           SET-LOCAL-INT(x, tmp3())
         LOAD-OPCODE-8-VAR-OFFSET :
-          mov(a, tmp3(), MemPtr(LOCAL(tmp2(), y), LOCAL(tmp1(), z), 0, value, SIZEOF-LONG))
-          SET-LOCAL(x, tmp3())
+          SET-LOCAL(x, { mov(a, _, MemPtr(LOCAL(tmp2(), y), LOCAL(tmp3(), z), 0, value, SIZEOF-LONG)) })
         else :
           fatal("MISSING E OPCODE %_" % [opcode])
 
@@ -1653,13 +1652,13 @@ public defn encode (fid:Int, func:VMFunction,
       dump-opcode(opcode-string(opcode, x, y, n1, n2)) when dumping-opcodes?
       switch(opcode) :
         JUMP-TAGBITS-OPCODE :
-          val bits = and-op(a, LOCAL-DST!(tmp1(), x), CONST(tmp2(), 0x7))
+          val bits = and-op(a, LOCAL-DST!(tmp1(), x), 0x7)
           cmp(a, bits, y)
           je(a, n1)
           jmp(a, n2)
         JUMP-TAGWORD-OPCODE :
           val obj = LOCAL(tmp1(), x) ; OBJ
-          and-op(a, LOCAL-DST!(tmp2(), x), CONST(tmp3(), 7)) ; TAGBITS
+          and-op(a, LOCAL-DST!(tmp2(), x), 7) ; TAGBITS
           val tag = LOCAL(tmp3(), y) ; TAG
           cmp(a, tmp2(), 1) ; tagbits == 1
           jne(a, n2)
