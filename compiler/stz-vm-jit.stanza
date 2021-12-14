@@ -296,14 +296,14 @@ val functions =      r12
 
 ;Temporary registers for implementing and local to VM instructions
 val tmp1 =           rbx
-val tmp1i =          ebx
-val tmp1b =          bl
 val tmp2 =           rsi
-val tmp2i =          esi
-val tmp2b =          sil
 val tmp3 =           rdi
-val tmp3i =          edi
-val tmp3b =          dil
+val tmp1i =          gp32(tmp1)
+val tmp1b =          gp8(tmp1)
+val tmp2i =          gp32(tmp2)
+val tmp2b =          gp8(tmp2)
+val tmp3i =          gp32(tmp3)
+val tmp3b =          gp8(tmp3)
 
 val tmp-regs = [tmp1, tmp2, tmp3]
 
@@ -1221,22 +1221,31 @@ public defn encode (fid:Int, func:VMFunction,
           je(a, value as Label)
 
     defn cmp-set (a:Assembler, x:Gp, y:Gp, z:Gp, zb:Gp, set:(Assembler, Gp) -> False) -> Gp :
-      xor-op(a, z, z)
       cmp(a, x, y)
+      mov(a, z, 0)
       set(a, zb)
       z
+
+    defn cmp-set (a:Assembler, x:Gp, y:Gp, z:Gp, set:(Assembler, Gp) -> False) -> Gp :
+      cmp-set(a, x, y, z, gp8(z), set)
 
     defn cmpf-set (a:Assembler, x:Xmm, y:Xmm, z:Gp, zb:Gp, set:(Assembler, Gp) -> False) -> Gp :
-      xor-op(a, z, z)
       ucomiss(a, x, y)
+      mov(a, z, 0)
       set(a, zb)
       z
 
+    defn cmpf-set (a:Assembler, x:Xmm, y:Xmm, z:Gp, set:(Assembler, Gp) -> False) -> Gp :
+      cmpf-set(a, x, y, z, gp8(z), set)
+
     defn cmpd-set (a:Assembler, x:Xmm, y:Xmm, z:Gp, zb:Gp, set:(Assembler, Gp) -> False) -> Gp :
-      xor-op(a, z, z)
       ucomisd(a, x, y)
+      mov(a, z, 0)
       set(a, zb)
       z
+
+    defn cmpd-set (a:Assembler, x:Xmm, y:Xmm, z:Gp, set:(Assembler, Gp) -> False) -> Gp :
+      cmpd-set(a, x, y, z, gp8(z), set)
 
     defn emit-ins-c (opcode:Int, x:Int, y:Int, value:Int) :
       trace-opcode(opcode, opcode-string(opcode, x, y, value)) when tracing?
@@ -1292,59 +1301,41 @@ public defn encode (fid:Int, func:VMFunction,
             shl(a, dst, 32)
           SET-LOCAL(x, shift)
         INT-LT-OPCODE :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-l)
-          SET-LOCAL(x, BOOLREF(res))
+          SET-LOCAL(x, { BOOLREF(cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-l)) })
         INT-GT-OPCODE :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-g)
-          SET-LOCAL(x, BOOLREF(res))
+          SET-LOCAL(x, { BOOLREF(cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-g)) })
         INT-LE-OPCODE :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-le)
-          SET-LOCAL(x, BOOLREF(res))
+          SET-LOCAL(x, { BOOLREF(cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-le)) })
         INT-GE-OPCODE :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-ge)
-          SET-LOCAL(x, BOOLREF(res))
+          SET-LOCAL(x, { BOOLREF(cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-ge)) })
         REF-EQ-OPCODE :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-e)
-          SET-LOCAL(x, BOOLREF(res))
+          SET-LOCAL(x, { BOOLREF(cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-e)) })
         EQ-OPCODE-REF :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-e)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-e) })
         EQ-OPCODE-BYTE :
-          val res = cmp-set(a, LOCAL-BYTE(tmp1b, y), LOCAL-BYTE(tmp2b, value), tmp3, tmp3b, set-e)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL-BYTE(tmp3b, y), LOCAL-BYTE(tmp2b, value), _, set-e) })
         EQ-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-e)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL-INT(tmp3i, y), LOCAL-INT(tmp2i, value), _, set-e) })
         EQ-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-e)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-e) })
         EQ-OPCODE-FLOAT :
-          val res = cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), tmp3, tmp3b, set-e)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), _, set-e) })
         EQ-OPCODE-DOUBLE :
-          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), tmp3, tmp3b, set-e)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), _, set-e) })
         REF-NE-OPCODE :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-ne)
-          SET-LOCAL(x, BOOLREF(res))
+          SET-LOCAL(x, { BOOLREF(cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-ne)) })
         NE-OPCODE-REF :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-ne)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-ne) })
         NE-OPCODE-BYTE :
-          val res = cmp-set(a, LOCAL-BYTE(tmp1b, y), LOCAL-BYTE(tmp2b, value), tmp3, tmp3b, set-ne)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL-BYTE(tmp3b, y), LOCAL-BYTE(tmp2b, value), _, set-ne) })
         NE-OPCODE-INT :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-ne)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-ne) })
         NE-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-ne)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-ne) })
         NE-OPCODE-FLOAT :
-          val res = cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), tmp3, tmp3b, set-ne)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), _, set-ne) })
         NE-OPCODE-DOUBLE :
-          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), tmp3, tmp3b, set-ne)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), _, set-ne) })
         ADD-OPCODE-BYTE :
           val dst = add(a, LOCAL-BYTE-DST!(tmp1b, y), LOCAL-BYTE(tmp2b, value))
           SET-LOCAL-BYTE(x, gp64(dst))
@@ -1473,89 +1464,61 @@ public defn encode (fid:Int, func:VMFunction,
           val dst = ashr(a, LOCAL-DST!(tmp1, y), LOCAL-DST!(rcx, value))
           SET-LOCAL(x, dst)
         LT-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-l)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL-INT(tmp3i, y), LOCAL-INT(tmp2i, value), _, set-l) })
         LT-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-l)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-l) })
         LT-OPCODE-FLOAT :
-          val res = cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), tmp3, tmp3b, set-b)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), _, set-b) })
         LT-OPCODE-DOUBLE :
-          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), tmp3, tmp3b, set-b)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), _, set-b) })
         GT-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-g)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL-INT(tmp3i, y), LOCAL-INT(tmp2i, value), _, set-g) })
         GT-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-g)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-g) })
         GT-OPCODE-FLOAT :
-          val res = cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), tmp3, tmp3b, set-a)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), _, set-a) })
         GT-OPCODE-DOUBLE :
-          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), tmp3, tmp3b, set-a)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), _, set-a) })
         LE-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-le)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL-INT(tmp3i, y), LOCAL-INT(tmp2i, value), _, set-le) })
         LE-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-le)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-le) })
         LE-OPCODE-FLOAT :
-          val res = cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), tmp3, tmp3b, set-be)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), _, set-be) })
         LE-OPCODE-DOUBLE :
-          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), tmp3, tmp3b, set-be)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), _, set-be) })
         GE-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-ge)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL-INT(tmp3i, y), LOCAL-INT(tmp2i, value), _, set-ge) })
         GE-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-ge)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-ge) })
         GE-OPCODE-FLOAT :
-          val res = cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), tmp3, tmp3b, set-ae)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmpf-set(a, LOCAL-FLOAT(xmm0, y), LOCAL-FLOAT(xmm1, value), _, set-ae) })
         GE-OPCODE-DOUBLE :
-          val res = cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), tmp3, tmp3b, set-ae)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmpd-set(a, LOCAL-DOUBLE(xmm0, y), LOCAL-DOUBLE(xmm1, value), _, set-ae) })
         ULT-OPCODE-BYTE :
-          val res = cmp-set(a, LOCAL-BYTE(tmp1b, y), LOCAL-BYTE(tmp2b, value), tmp3, tmp3b, set-b)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL-BYTE(tmp3b, y), LOCAL-BYTE(tmp2b, value), _, set-b) })
         ULT-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-b)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL-INT(tmp3i, y), LOCAL-INT(tmp2i, value), _, set-b) })
         ULT-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-b)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-b) })
         ULE-OPCODE-BYTE :
-          val res = cmp-set(a, LOCAL-BYTE(tmp1b, y), LOCAL-BYTE(tmp2b, value), tmp3, tmp3b, set-be)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL-BYTE(tmp3b, y), LOCAL-BYTE(tmp2b, value), _, set-be) })
         ULE-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-be)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL-INT(tmp3i, y), LOCAL-INT(tmp2i, value), _, set-be) })
         ULE-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-be)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-be) })
         UGT-OPCODE-BYTE :
-          val res = cmp-set(a, LOCAL-BYTE(tmp1b, y), LOCAL-BYTE(tmp2b, value), tmp3, tmp3b, set-a)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL-BYTE(tmp3b, y), LOCAL-BYTE(tmp2b, value), _, set-a) })
         UGT-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-a)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL-INT(tmp3i, y), LOCAL-INT(tmp2i, value), _, set-a) })
         UGT-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-a)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-a) })
         UGE-OPCODE-BYTE :
-          val res = cmp-set(a, LOCAL-BYTE(tmp1b, y), LOCAL-BYTE(tmp2b, value), tmp3, tmp3b, set-ae)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL-BYTE(tmp3b, y), LOCAL-BYTE(tmp2b, value), _, set-ae) })
         UGE-OPCODE-INT :
-          val res = cmp-set(a, LOCAL-INT(tmp1i, y), LOCAL-INT(tmp2i, value), tmp3, tmp3b, set-ae)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL-INT(tmp3i, y), LOCAL-INT(tmp2i, value), _, set-ae) })
         UGE-OPCODE-LONG :
-          val res = cmp-set(a, LOCAL(tmp1, y), LOCAL(tmp2, value), tmp3, tmp3b, set-ae)
-          SET-LOCAL(x, res)
+          SET-LOCAL(x, { cmp-set(a, LOCAL(tmp3, y), LOCAL(tmp2, value), _, set-ae) })
         ALLOC-OPCODE-LOCAL :
           val num-bytes = tmp3
           LOCAL-DST!(num-bytes, y)
