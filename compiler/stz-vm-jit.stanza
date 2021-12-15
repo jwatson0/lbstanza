@@ -22,7 +22,7 @@ defpackage stz/vm-jit :
 ;In particular it uses exactly the same vmstate structures with
 ;the following minor differences:
 ;o caches fewer fields in registers to conserve x86 registers
-;o caches first few VM registers and locals in x86 registers
+;o caches first 2 VM registers and 3 locals in x86 registers
 ;o uses ASMJit labels instead of buffer positions
 ;o uses ASMJit Funcs for functions instead of buffer positions
 
@@ -30,13 +30,13 @@ public var JIT-LOG-FILE:FileOutputStream = STANDARD-OUTPUT-STREAM as FileOutputS
 
 ;Configuration
 
-val local-regs? = true        ;Use x86 registers for first few vm locals?
-val reg-regs? = true          ;Use x86 registers for first few vm registers?
+val local-regs? = false        ;Use x86 registers for first few vm locals?
+val reg-regs? = false          ;Use x86 registers for first few vm registers?
 val debugging? = false        ;General debugging output?
 val tracing? = false          ;Tracing execution of vm instructions and writes?
-val jit-callc? = true         ;JIT simple callc invocations?
-val disassembling? = false    ;Disassemble JITd code?
-val dumping-opcodes? = false  ;Dumping opcodes within disassembled code
+val jit-callc? = false         ;JIT simple callc invocations?
+val disassembling? = true    ;Disassemble JITd code?
+val dumping-opcodes? = true  ;Dumping opcodes within disassembled code
 
 ;Resolver api and structures
 
@@ -104,6 +104,8 @@ lostanza defn c-trampoline-addr () -> ref<Long> :
 
 defn c-trampoline (a:Assembler, faddr:Gp, registers:Gp, returns:Gp) :
   stanza-call(a, c-trampoline-addr(), [faddr, registers, returns])
+
+;Interface to extern function support for dispatching, gcing, etc
 
 extern read_dispatch_table: (ptr<?>, int) -> int
 extern print_dispatch_time: () -> int
@@ -290,7 +292,7 @@ val FUNCTION-SLOTS-OFFSET = next(function-offsets, SIZEOF-LONG)
 ;Registers to cache VMState and crucial fields
 val stk =            r8
 val registers =      r9
-val stack-pointer =  r10
+val stack-pointer =  r10 ;stack frame
 val vmstate =        r11
 val functions =      r12
 
@@ -647,7 +649,7 @@ public defn encode (fid:Int, func:VMFunction,
   val trace-entry-table = Vector<TraceTableEntry>()
   val f = within (code, a) = gen-code(rt, disassembling?, JIT-LOG-FILE) :
     println(JIT-LOG-FILE, "--- ENCODING %_" % [fid]) when (dumping-opcodes? or debugging? or disassembling?)
-    dump(a, "--- FID %d\n", CONST(a, loc1, fid)) when tracing?
+    dump(a, "--- FID %d\n", CONST(a, loc1, fid)) ; when tracing?
 
     defn CONST (x:Gp, id:Int|Long) -> Gp : (mov(a, x, to-long(id)), x)
     defn CONST (id:Int|Long) -> Gp : CONST(tmp1, id)
@@ -1008,21 +1010,18 @@ public defn encode (fid:Int, func:VMFunction,
           not-op(a, LOCAL-INT-DST!(tmp1i, value))
           SET-LOCAL-INT(x, tmp1)
         NOT-OPCODE-LONG :
-          val dst = not-op(a, LOCAL-DST!(tmp2, value))
-          SET-LOCAL(x, dst)
+          SET-LOCAL(x, not-op(a, LOCAL-DST!(tmp2, value)))
         NEG-OPCODE-INT :
-          val dst = neg(a, LOCAL-DST!(tmp1, value))
-          SET-LOCAL-INT(x, dst)
+          SET-LOCAL-INT(x, neg(a, LOCAL-DST!(tmp1, value)))
         NEG-OPCODE-LONG :
-          val dst = neg(a, LOCAL-DST!(tmp2, value))
-          SET-LOCAL(x, dst)
+          SET-LOCAL(x, neg(a, LOCAL-DST!(tmp2, value)))
         NEG-OPCODE-FLOAT :
-          xor-op(a, tmp1, tmp1) ; FASTER METHOD?
+          xor-op(a, tmp1, tmp1)
           cvtsi2ss(a, xmm0, tmp1)
           subss(a, xmm0, LOCAL-FLOAT(xmm1, value))
           SET-LOCAL-FLOAT(x, xmm0)
         NEG-OPCODE-DOUBLE :
-          xor-op(a, tmp1, tmp1) ; FASTER METHOD?
+          xor-op(a, tmp1, tmp1)
           cvtsi2sd(a, xmm0, tmp1)
           subsd(a, xmm0, LOCAL-DOUBLE(xmm1, value))
           SET-LOCAL-DOUBLE(x, xmm0)
@@ -1033,7 +1032,6 @@ public defn encode (fid:Int, func:VMFunction,
           cvtsd2si(a, tmp1, LOCAL-DOUBLE(xmm0, value))
           SET-LOCAL-BYTE(x, tmp1)
         CONV-OPCODE-INT-BYTE :
-          xor-op(a, tmp1, tmp1) ; TODO: REMOVE?
           mov(a, tmp1b, LOCAL-BYTE(tmp1b, value))
           SET-LOCAL-INT(x, tmp1)
         CONV-OPCODE-INT-FLOAT :
@@ -1043,7 +1041,6 @@ public defn encode (fid:Int, func:VMFunction,
           cvtsd2si(a, tmp1i, LOCAL-DOUBLE(xmm0, value))
           SET-LOCAL-INT(x, tmp1)
         CONV-OPCODE-LONG-BYTE :
-          xor-op(a, tmp1, tmp1) ; TODO: REMOVE?
           mov(a, tmp1b, LOCAL-BYTE(tmp1b, value))
           SET-LOCAL(x, tmp1)
         CONV-OPCODE-LONG-INT :
@@ -1087,9 +1084,7 @@ public defn encode (fid:Int, func:VMFunction,
         DETAG-OPCODE :
           SET-LOCAL(x, { DETAG(_, LOCAL(tmp2, value)) })
         DEREF-OPCODE :
-          val ref = LOCAL-DST!(tmp2, value)
-          add(a, ref, 8 - REF-TAG-BITS)
-          SET-LOCAL(x, ref)
+          SET-LOCAL(x, add(a, LOCAL-DST!(tmp2, value), 8 - REF-TAG-BITS))
         GC-OPCODE :
           val size = LOCAL(tmp1, value)
           save-local-registers(a)
