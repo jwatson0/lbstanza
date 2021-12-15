@@ -30,13 +30,13 @@ public var JIT-LOG-FILE:FileOutputStream = STANDARD-OUTPUT-STREAM as FileOutputS
 
 ;Configuration
 
-val local-regs? = false        ;Use x86 registers for first few vm locals?
-val reg-regs? = false          ;Use x86 registers for first few vm registers?
-val debugging? = false        ;General debugging output?
-var tracing?:True|False = false          ;Tracing execution of vm instructions and writes?
-val jit-callc? = true         ;JIT simple callc invocations?
-val disassembling? = true    ;Disassemble JITd code?
-val dumping-opcodes? = true  ;Dumping opcodes within disassembled code
+val local-regs? = true          ;Use x86 registers for first few vm locals?
+val reg-regs? = true            ;Use x86 registers for first few vm registers?
+val debugging? = false          ;General debugging output?
+var tracing?:True|False = false ;Tracing execution of vm instructions and writes?
+val jit-callc? = true           ;JIT simple callc invocations?
+val disassembling? = true       ;Disassemble JITd code?
+val dumping-opcodes? = true     ;Dumping opcodes within disassembled code
 
 ;Resolver api and structures
 
@@ -337,7 +337,7 @@ val c-caller-saved-registers = [r8, r9, r10, r11]
 val stanza-caller-saved-registers  = [vmstate, registers, functions, stack-pointer, stk]
 val etc-saved-registers = stanza-caller-saved-registers
 val low-saved-registers = [rbx, rcx, rsi, rdi rdx]
-val all-saved-registers = to-tuple $ cat(low-saved-registers, stanza-caller-saved-registers)
+val all-saved-registers = to-tuple $ cat-all $ [low-saved-registers, stanza-caller-saved-registers, local-regs]
 
 defn save-registers (a:Assembler, regs:Seqable<Gp>) :
   for reg in regs do : push(a, reg)
@@ -406,27 +406,26 @@ lostanza defn printf-format (s:ref<String>) -> ref<Long> :
 lostanza defn printf-addr () -> ref<Long> :
   return new Long{addr!(printf) as long}
 
-defn dump (a:Assembler, format:String, a0:Gp, a1:Gp, a2:Gp, a3:Gp) :
+val dump-save-registers = [r8, r9, r10, r11, r12]
+val c-args              = [rdi, rsi, rdx, rcx, r8, r9]
+
+defn dump (a:Assembler, format:String, args:Tuple<Gp|Int|Long>) :
   all-save-registers(a)
+  push(a, rax)
+  val regs = to-tuple $ for (arg in args, reg in c-args) seq :
+    match(arg) :
+      (arg:Gp) : arg
+      (arg:Int|Long) : mov(a, reg, arg)
   mov(a, r8,  printf-format(format))
-  mov(a, r9,  a0)
-  mov(a, r10, a1)
-  mov(a, r11, a2)
-  mov(a, r12, a3)
-  mov(a, rdi, r8)
-  mov(a, rsi, r9)
-  mov(a, rdx, r10)
-  mov(a, rcx, r11)
-  mov(a, r8,  r12)
+  for (save-reg in dump-save-registers[1 to false], reg in regs) do :
+    mov(a, save-reg, reg)
+  for (arg in c-args, save-reg in dump-save-registers) do :
+    mov(a, arg, save-reg)
   mov(a, rax, 0L)
   mov(a, tmp1, printf-addr())
   call(a, tmp1)
+  pop(a, rax)
   all-restore-registers(a)
-
-defn dump (a:Assembler, format:String) : dump(a, format, rax, rax, rax, rax)
-defn dump (a:Assembler, format:String, a0:Gp) : dump(a, format, a0, rax, rax, rax)
-defn dump (a:Assembler, format:String, a0:Gp, a1:Gp) : dump(a, format, a0, a1, rax, rax)
-defn dump (a:Assembler, format:String, a0:Gp, a1:Gp, a2:Gp) : dump(a, format, a0, a1, a2, rax)
 
 extern dump_registers: () -> int
 
@@ -472,24 +471,24 @@ lostanza defn dump-memory-64 (a:ref<Assembler>, start:ref<Gp>, n:ref<Long>) -> r
   return dump-memory-x(a, dump-memory-64-addr(), start, n)
 
 defn dump-stack-frame (a:Assembler, sp:Gp) :
-  dump(a, "STACK-FRAME:\n") when debugging?
+  dump(a, "STACK-FRAME:\n", []) when debugging?
   dump-memory-64(a, sp, 3L) when debugging?
 
 defn dump-state (a:Assembler, msg:String) :
-  dump(a, msg)
+  dump(a, msg, [])
   dump-memory-64(a, vmstate, 16L)
-  dump(a, "REGISTERS:     %p\n", registers)
-  dump(a, "STK:           %p\n", stk)
-  dump(a, "STACK-POINTER: %p\n", stack-pointer)
+  dump(a, "REGISTERS:     %p\n", [registers])
+  dump(a, "STK:           %p\n", [stk])
+  dump(a, "STACK-POINTER: %p\n", [stack-pointer])
   ; dump-memory-64(a, stack-pointer, 6L)
 
 defn dump-stack-state (a:Assembler, msg:String) :
-  dump(a, msg)
-  dump(a, "CURRENT-STACK: %p\n", get-current-stack(a, rax))
-  dump(a, "SYSTEM-STACK:  %p\n", get-system-stack(a, rax))
-  dump(a, "STK:           %p\n", stk)
-  dump(a, "STACK-POINTER: %p\n", stack-pointer)
-  dump(a, "STACK-LIMIT:   %p\n", compute-stack-limit(a, rax))
+  dump(a, msg, [])
+  dump(a, "CURRENT-STACK: %p\n", [get-current-stack(a, rax)])
+  dump(a, "SYSTEM-STACK:  %p\n", [get-system-stack(a, rax)])
+  dump(a, "STK:           %p\n", [stk])
+  dump(a, "STACK-POINTER: %p\n", [stack-pointer])
+  dump(a, "STACK-LIMIT:   %p\n", [compute-stack-limit(a, rax)])
   ; dump-memory-64(a, stack-pointer, 6L)
 
 ;Entry point for launching JIT session from stz-vm.stanza
@@ -513,6 +512,7 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long) -> Func :
     val ret-label = new-label(a)
     lea(a, tmp2, MemPtr(ret-label))
     set-return(a, tmp2)         ;Set return address in current frame
+    restore-vm-registers(a)     ;Cache vm memory register into x86 registers (for call-extern)
     mov(a, tmp1, MemPtr(functions, init-id, 3, 0)) ;Load initial function
     jmp(a, tmp1)                ;Launch!
     bind(a, ret-label)          ;Return address     
@@ -536,7 +536,7 @@ defn reg-access (r:Int, mem-only?:True|False) -> Gp|MemPtr :
 ;Set register into registers vector or x86 register if possible with mem-only? override
 defn do-SET-REG (a:Assembler, r:Int, v:Gp, mem-only?:True|False) -> False :
   mov(a, reg-access(r, mem-only?), v)
-  dump(a, "  SET-REG[%d,%d] = %p\n", CONST(a, rcx, r), CONST(a, rax, 1 when mem-only? else 0), v) when tracing?
+  dump(a, "  SET-REG[%d,%d] = %p\n", [r, 1 when mem-only? else 0, v]) when tracing?
   false
 defn do-SET-REG (a:Assembler, r:Int, v:Gp -> Gp, mem-only?:True|False) -> False :
   ; val rv = (mov(a, reg-access(r, mem-only?), v(tmp1)), tmp1)
@@ -544,7 +544,7 @@ defn do-SET-REG (a:Assembler, r:Int, v:Gp -> Gp, mem-only?:True|False) -> False 
     (acc:Gp)     : v(acc)
     (acc:MemPtr) : (mov(a, acc, v(tmp1)), tmp1)
   ; mov(a, reg-access(r, mem-only?), v)
-  dump(a, "  SET-REG[%d,%d] = %p\n", CONST(a, rcx, r), CONST(a, rax, 1 when mem-only? else 0), rv) when tracing?
+  dump(a, "  SET-REG[%d,%d] = %p\n", [r, 1 when mem-only? else 0, rv]) when tracing?
   false
 
 ;Save/Restore to VMState
@@ -567,14 +567,20 @@ defn local-mem-access (l:Int) -> MemPtr :
 ;Save x86 register cache to memory vector for VM locals
 defn save-local-registers (a:Assembler) :
   for i in 0 to num-local-regs do :
-    ; dump(a, "SAVING LREG[%d] %p\n", CONST(rax, i), local-regs[i])
+    ; dump(a, "SAVING LREG[%d] %p\n", [i, local-regs[i]])
     mov(a, local-mem-access(i), local-regs[i])
 
 ;Restore x86 register cache from memory vector for VM locals
 defn restore-local-registers (a:Assembler) :
   for i in 0 to num-local-regs do :
     mov(a, local-regs[i], local-mem-access(i))
-    ; dump(a, "RESTORING LREG[%d] %p\n", CONST(rax, i), local-regs[i])
+    ; dump(a, "RESTORING LREG[%d] %p\n", [i, local-regs[i]])
+
+;Restore x86 register cache from memory vector for VM registers
+defn restore-vm-registers (a:Assembler) :
+  for i in 0 to num-reg-regs do :
+    mov(a, reg-regs[i], reg-mem-access(i))
+    ; dump(a, "RESTORING RREG[%d] %p\n", [i, reg-regs[i]])
 
 ;Stack extension support
 
@@ -648,9 +654,9 @@ public defn encode (fid:Int, func:VMFunction,
   val extend-stack-launch-value = value(extend-stack-launch)
   val trace-entry-table = Vector<TraceTableEntry>()
   val f = within (code, a) = gen-code(rt, disassembling?, JIT-LOG-FILE) :
-    ; tracing? = fid == 903
+    ; tracing? = fid == 3272
     println(JIT-LOG-FILE, "--- ENCODING %_" % [fid]) when (dumping-opcodes? or debugging? or disassembling?)
-    ; dump(a, "--- FID %d\n", CONST(a, loc1, fid)) ; when tracing?
+    dump(a, "--- FID %d\n", [fid]) when tracing?
 
     defn CONST (x:Gp, id:Int|Long) -> Gp : (mov(a, x, to-long(id)), x)
     defn CONST (id:Int|Long) -> Gp : CONST(tmp1, id)
@@ -673,7 +679,7 @@ public defn encode (fid:Int, func:VMFunction,
     ;stack traces.
     defn record-trace-entry (entry:StackTraceEntry|False) :
       match(entry:StackTraceEntry) :
-        dump(a, "+++ %s\n", CONST(tmp1, printf-format(to-string(entry)))) when debugging?
+        dump(a, "+++ %s\n", [printf-format(to-string(entry))]) when debugging?
         add(trace-entry-table, TraceTableEntry(buffer-pos(), entry))
 
     ;Calculation of sizes
@@ -708,7 +714,7 @@ public defn encode (fid:Int, func:VMFunction,
 
     defn GET-REG (dst:Gp, r:Int, mem-only?:True|False) -> Gp :
       mov(a, dst, reg-access(r, mem-only?))
-      dump(a, "  GET-REG[%d,%d] = %p\n", CONST(tmp2, r), CONST(tmp3, 1 when mem-only? else 0), dst) when tracing?
+      dump(a, "  GET-REG[%d,%d] = %p\n", [r, 1 when mem-only? else 0, dst]) when tracing?
       dst
     defn GET-REG (dst:Gp, r:Int) -> Gp :
       GET-REG(dst, r, MEM-REG-ONLY?)
@@ -740,7 +746,7 @@ public defn encode (fid:Int, func:VMFunction,
     
     defn SET-LOCAL (l:Int, v:Gp) -> False :
       mov(a, local-access(l), v)
-      dump(a, "  SET-LOCAL[%d] = %p\n", CONST(rax, l), v) when (debugging? or tracing?)
+      dump(a, "  SET-LOCAL[%d] = %p\n", [l, v]) when (debugging? or tracing?)
       false
     defn SET-LOCAL (l:Int, v:Gp -> Gp) -> False :
       ; val r = (mov(a, local-access(l), v(tmp1)), tmp1)
@@ -748,7 +754,7 @@ public defn encode (fid:Int, func:VMFunction,
         (acc:Gp)     : v(acc)
         (acc:MemPtr) : (mov(a, acc, v(tmp1)), tmp1)
       ; mov(a, local-access(l), v)
-      dump(a, "  SET-LOCAL[%d] = %p\n", CONST(rax, l), r) when (debugging? or tracing?)
+      dump(a, "  SET-LOCAL[%d] = %p\n", [l, r]) when (debugging? or tracing?)
       false
     defn SET-LOCAL-BYTE (l:Int, v:Gp) :
       and-op(a, v, 0xff)
@@ -762,10 +768,10 @@ public defn encode (fid:Int, func:VMFunction,
       SET-LOCAL(l, { (val y = gp64(v(_)), movsxd(a, y, y)) })
     defn SET-LOCAL-FLOAT (l:Int,v:Xmm) :
       movsd(a, local-access(l), v)
-      dump(a, "SET-LOCAL-FLOAT[%d] %p\n", CONST(rax, l), LOCAL(tmp1, l)) when (debugging? or tracing?)
+      dump(a, "SET-LOCAL-FLOAT[%d] %p\n", [l, LOCAL(tmp1, l)]) when (debugging? or tracing?)
     defn SET-LOCAL-DOUBLE (l:Int, v:Xmm) :
       movsd(a, local-access(l), v)
-      dump(a, "SET-LOCAL-DOUBLE[%d] %p\n", CONST(rax, l), LOCAL(tmp1, l)) when (debugging? or tracing?)
+      dump(a, "SET-LOCAL-DOUBLE[%d] %p\n", [l, LOCAL(tmp1, l)]) when (debugging? or tracing?)
 
     ;Local getters
 
@@ -858,10 +864,12 @@ public defn encode (fid:Int, func:VMFunction,
     defn trace-opcode (opcode:Int, name:String) :
       val format = string-join $ [ "%d: " name "\n" ]
       val counter = rdi
+      push(a, counter)
       get-instructions(a, counter)
-      dump(a, format, counter) when tracing?
+      dump(a, format, [counter]) when tracing?
       add(a, counter, 1)
       set-instructions(a, counter)
+      pop(a, counter)
       add(covered, opcode)
 
     defn dump-opcode (name:String) :
@@ -1527,14 +1535,14 @@ public defn encode (fid:Int, func:VMFunction,
         val o = CONST(tmp2, ov)
         val v = LOCAL(tmp3, vi, size)
         mov(a, MemPtr(p, o, 0, 0, size), v)
-        dump(a, "  STORE-%d %p[%d] = %p\n" CONST(rax, size) p o v) when (debugging? or tracing?)
+        dump(a, "  STORE-%d %p[%d] = %p\n" [size p o v]) when (debugging? or tracing?)
 
       defn store-var (pi:Int, ii:Int, ov:Int, vi:Int, size:Int) :
         val p = LOCAL(tmp1, pi)
         val i = LOCAL(tmp2, ii)
         val v = LOCAL(tmp3, vi, size)
         mov(a, MemPtr(p, i, 0, ov, size), v)
-        dump(a, "  STORE-%d* %p[%d] = %p\n" CONST(rcx, size) p i v) when (debugging? or tracing?)
+        dump(a, "  STORE-%d* %p[%d] = %p\n" [size p i v]) when (debugging? or tracing?)
 
       switch(opcode) :
         STORE-OPCODE-1 :
@@ -1845,10 +1853,10 @@ public defn encode (fid:Int, func:VMFunction,
 
       defn before-call-dump (entry:False|StackTraceEntry) :
         match(entry:StackTraceEntry) :
-          dump(a, ">>> %s\n", CONST(rax, printf-format(to-string(entry)))) when (debugging? or tracing?)
+          dump(a, ">>> %s\n", [printf-format(to-string(entry))]) when (debugging? or tracing?)
 
       defn jit-simple-callc (ins:CallCIns, records:CallCRecords) :
-        ; dump(a, "CALLC %d %d\n", CONST(tmp1, num-int-args(records)), CONST(tmp2, num-real-args(records)))
+        ; dump(a, "==> CALLC %d %d\n", [num-int-args(records), num-real-args(records)])
         println(JIT-LOG-FILE, "CALLC %_ %_" % [num-int-args(records), num-real-args(records)]) when dumping-opcodes?
 
         before-call-dump(trace-entry(ins))
@@ -1882,9 +1890,11 @@ public defn encode (fid:Int, func:VMFunction,
           (f:ExternId) : CONST(t2, to-bits(f) as Long)
 
         PUSH-FRAME-ONLY(num-locals)
+        push(a, stack-pointer)
 
         call(a, f)
 
+        pop(a, stack-pointer)
         POP-FRAME(num-locals)
 
         RESTORE-STATE(a)
@@ -1907,7 +1917,7 @@ public defn encode (fid:Int, func:VMFunction,
         match(ins) :
           (ins:LabelIns) :
             val lab = maybe-add-new-label(n(ins))
-            dump(a, string-join $ [lab, ":\n"]) when tracing?
+            dump(a, string-join $ [lab, ":\n"], []) when tracing?
             bind(a, lab)
           (ins:UnreachableIns) :
             false
