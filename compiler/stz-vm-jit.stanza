@@ -33,8 +33,8 @@ public var JIT-LOG-FILE:FileOutputStream = STANDARD-OUTPUT-STREAM as FileOutputS
 val local-regs? = false        ;Use x86 registers for first few vm locals?
 val reg-regs? = false          ;Use x86 registers for first few vm registers?
 val debugging? = false        ;General debugging output?
-val tracing? = false          ;Tracing execution of vm instructions and writes?
-val jit-callc? = false         ;JIT simple callc invocations?
+var tracing?:True|False = false          ;Tracing execution of vm instructions and writes?
+val jit-callc? = true         ;JIT simple callc invocations?
 val disassembling? = true    ;Disassemble JITd code?
 val dumping-opcodes? = true  ;Dumping opcodes within disassembled code
 
@@ -648,8 +648,9 @@ public defn encode (fid:Int, func:VMFunction,
   val extend-stack-launch-value = value(extend-stack-launch)
   val trace-entry-table = Vector<TraceTableEntry>()
   val f = within (code, a) = gen-code(rt, disassembling?, JIT-LOG-FILE) :
+    ; tracing? = fid == 903
     println(JIT-LOG-FILE, "--- ENCODING %_" % [fid]) when (dumping-opcodes? or debugging? or disassembling?)
-    dump(a, "--- FID %d\n", CONST(a, loc1, fid)) ; when tracing?
+    ; dump(a, "--- FID %d\n", CONST(a, loc1, fid)) ; when tracing?
 
     defn CONST (x:Gp, id:Int|Long) -> Gp : (mov(a, x, to-long(id)), x)
     defn CONST (id:Int|Long) -> Gp : CONST(tmp1, id)
@@ -1032,6 +1033,7 @@ public defn encode (fid:Int, func:VMFunction,
           cvtsd2si(a, tmp1, LOCAL-DOUBLE(xmm0, value))
           SET-LOCAL-BYTE(x, tmp1)
         CONV-OPCODE-INT-BYTE :
+          xor-op(a, tmp1, tmp1) 
           mov(a, tmp1b, LOCAL-BYTE(tmp1b, value))
           SET-LOCAL-INT(x, tmp1)
         CONV-OPCODE-INT-FLOAT :
@@ -1041,6 +1043,7 @@ public defn encode (fid:Int, func:VMFunction,
           cvtsd2si(a, tmp1i, LOCAL-DOUBLE(xmm0, value))
           SET-LOCAL-INT(x, tmp1)
         CONV-OPCODE-LONG-BYTE :
+          xor-op(a, tmp1, tmp1)
           mov(a, tmp1b, LOCAL-BYTE(tmp1b, value))
           SET-LOCAL(x, tmp1)
         CONV-OPCODE-LONG-INT :
@@ -1846,7 +1849,7 @@ public defn encode (fid:Int, func:VMFunction,
 
       defn jit-simple-callc (ins:CallCIns, records:CallCRecords) :
         ; dump(a, "CALLC %d %d\n", CONST(tmp1, num-int-args(records)), CONST(tmp2, num-real-args(records)))
-        println(JIT-LOG-FILE, "CALLC %_ %_" % [num-int-args(records), num-real-args(records)])
+        println(JIT-LOG-FILE, "CALLC %_ %_" % [num-int-args(records), num-real-args(records)]) when dumping-opcodes?
 
         before-call-dump(trace-entry(ins))
 
@@ -1854,7 +1857,7 @@ public defn encode (fid:Int, func:VMFunction,
         val t1 = rax ; NOT USED IN ARGS FOR CALLING
         val t2 = r12 ; HAS FUNCTIONS IN IT WHICH IS NOT USED AND NOT SAVED AND NOT ARG
         
-        push(a, t2)
+        SAVE-STATE(a)
         
         ;Move args into x86 registers
         defn imm-to-reg (dst:Gp, y:VMImm, dst?:True|False) -> Gp:
@@ -1879,14 +1882,12 @@ public defn encode (fid:Int, func:VMFunction,
           (f:ExternId) : CONST(t2, to-bits(f) as Long)
 
         PUSH-FRAME-ONLY(num-locals)
-        SAVE-STATE(a)
 
         call(a, f)
 
-        RESTORE-STATE(a)
         POP-FRAME(num-locals)
 
-        pop(a, t2)
+        RESTORE-STATE(a)
         
         record-trace-entry(trace-entry(ins))
 
@@ -2250,6 +2251,7 @@ public defn encode (fid:Int, func:VMFunction,
 
     encode(func as VMMultifn|VMFunc)
 
+  ; tracing? = false
   println(JIT-LOG-FILE, "--> FUNC 0x%_" % [hex(value(f))]) when (dumping-opcodes? or disassembling?)
   EncodedFunction(f, trace-entry-table)
 
