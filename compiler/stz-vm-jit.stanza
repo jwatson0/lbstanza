@@ -289,7 +289,7 @@ val FUNCTION-SLOTS-OFFSET = next(function-offsets, SIZEOF-LONG)
 
 ;Register map
 
-;Registers to cache VMState and crucial fields
+;Registers to cache VMState and crucial fields that need to be fast
 val stk =            r8
 val registers =      r9
 val stack-pointer =  r10 ;stack frame
@@ -320,7 +320,8 @@ val num-local-regs = length(local-regs)
 
 ;x86 register caching of VM registers
 
-;dynamic variable that determines whether reg is accessed through memory
+;dynamic variable that determines whether reg is accessed through memory instead of cache
+;the reason would be if receiving end expects them in memory
 var MEM-REG-ONLY?:True|False = false 
 
 val reg1 =           rcx
@@ -330,10 +331,9 @@ val reg3 =           rax ;doesn't work because corrupted
 val reg-regs = [reg1, reg2] when reg-regs? else []
 val num-reg-regs = length(reg-regs)
 
-;calling convention registers to save/restore
+;;; Calling convention registers to save/restore
 
 val c-caller-saved-registers = [r8, r9, r10, r11]
-; defn stanza-caller-saved-registers  : cat([vmstate, registers, functions, stack-pointer, stk], local-regs)
 val stanza-caller-saved-registers  = [vmstate, registers, functions, stack-pointer, stk]
 val etc-saved-registers = stanza-caller-saved-registers
 val low-saved-registers = [rbx, rcx, rsi, rdi rdx]
@@ -360,21 +360,81 @@ defn all-restore-registers (a:Assembler) : restore-registers(a, all-saved-regist
 defn local-save-registers (a:Assembler) : save-registers(a, local-regs)
 defn local-restore-registers (a:Assembler) : restore-registers(a, local-regs)
 
-;Tagging
+;;; Accesses and state saving/restoring
 
-val INT-TAG-BITS = 0
-val REF-TAG-BITS = 1
+defn CONST (a:Assembler, x:Gp, id:Int|Long) -> Gp :
+  mov(a, x, id)
+
+;Addressing for register from registers vector
+defn reg-mem-access (r:Int) -> MemPtr :
+  MemPtr(registers, r * SIZEOF-LONG)    
+;Access register from registers vector or x86 register if possible with mem-only? override
+defn reg-access (r:Int, mem-only?:True|False) -> Gp|MemPtr :
+  reg-mem-access(r) when (mem-only? or r >= num-reg-regs) else reg-regs[r]
+;Set register into registers vector or x86 register if possible with mem-only? override
+defn do-SET-REG (a:Assembler, r:Int, v:Gp, mem-only?:True|False) -> False :
+  mov(a, reg-access(r, mem-only?), v)
+  dump(a, "  SET-REG[%d,%d] = %p\n", [r, 1 when mem-only? else 0, v]) when tracing?
+  false
+defn do-SET-REG (a:Assembler, r:Int, v:Gp -> Gp, mem-only?:True|False) -> False :
+  ; val rv = (mov(a, reg-access(r, mem-only?), v(tmp1)), tmp1)
+  val rv = match(reg-access(r, mem-only?)) :
+    (acc:Gp)     : v(acc)
+    (acc:MemPtr) : (mov(a, acc, v(tmp1)), tmp1)
+  ; mov(a, reg-access(r, mem-only?), v)
+  dump(a, "  SET-REG[%d,%d] = %p\n", [r, 1 when mem-only? else 0, rv]) when tracing?
+  false
+
+;Save/Restore to VMState
+defn SAVE-STATE-ONLY (a:Assembler) :
+  set-stack-pointer(a, stack-pointer)
+
+defn SAVE-STATE (a:Assembler) :
+  SAVE-STATE-ONLY(a)
+  etc-save-registers(a)
+
+defn RESTORE-STATE (a:Assembler) :
+  etc-restore-registers(a)
+  untag-stack(a, stk, get-current-stack(a, tmp1))
+  get-stack-pointer(a, stack-pointer)
+
+;Addressing for local from locals in stack frame
+defn local-mem-access (l:Int) -> MemPtr :
+  MemPtr(stack-pointer, l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET)    
+
+;Save x86 register cache to memory vector for VM locals
+defn save-local-registers (a:Assembler) :
+  for i in 0 to num-local-regs do :
+    ; dump(a, "SAVING LREG[%d] %p\n", [i, local-regs[i]])
+    mov(a, local-mem-access(i), local-regs[i])
+
+;Restore x86 register cache from memory vector for VM locals
+defn restore-local-registers (a:Assembler) :
+  for i in 0 to num-local-regs do :
+    mov(a, local-regs[i], local-mem-access(i))
+    ; dump(a, "RESTORING LREG[%d] %p\n", [i, local-regs[i]])
+
+;Restore x86 register cache from memory vector for VM registers
+defn restore-vm-registers (a:Assembler) :
+  for i in 0 to num-reg-regs do :
+    mov(a, reg-regs[i], reg-mem-access(i))
+    ; dump(a, "RESTORING RREG[%d] %p\n", [i, reg-regs[i]])
+
+;;; Tagging
+
+val INT-TAG-BITS    = 0
+val REF-TAG-BITS    = 1
 val MARKER-TAG-BITS = 2
-val BYTE-TAG-BITS = 3
-val CHAR-TAG-BITS = 4
-val FLOAT-TAG-BITS = 5
+val BYTE-TAG-BITS   = 3
+val CHAR-TAG-BITS   = 4
+val FLOAT-TAG-BITS  = 5
 
 defn do-BOOLREF (a:Assembler, x:Gp) -> Gp :
   shl(a, x, 3)
   add(a, x, MARKER-TAG-BITS)
   x
 
-;Debugging mechanism
+;;; Debugging mechanism
 
 ;TODO: should be moved to core.stanza
 defn hex (n:Long) -> String :
@@ -417,10 +477,13 @@ defn dump (a:Assembler, format:String, args:Tuple<Gp|Int|Long>) :
       (arg:Gp) : arg
       (arg:Int|Long) : mov(a, reg, arg)
   mov(a, r8,  printf-format(format))
+  ;move into saved regs to do a reshuffle in case c-args are in args
   for (save-reg in dump-save-registers[1 to false], reg in regs) do :
     mov(a, save-reg, reg)
+  ;now can move to real c-args 
   for (arg in c-args, save-reg in dump-save-registers) do :
     mov(a, arg, save-reg)
+  ;clear xmm count register
   mov(a, rax, 0L)
   mov(a, tmp1, printf-addr())
   call(a, tmp1)
@@ -491,6 +554,8 @@ defn dump-stack-state (a:Assembler, msg:String) :
   dump(a, "STACK-LIMIT:   %p\n", [compute-stack-limit(a, rax)])
   ; dump-memory-64(a, stack-pointer, 6L)
 
+;;; JITed trampoline functions
+
 ;Entry point for launching JIT session from stz-vm.stanza
 ;Used for initiated REPL call or stz-extern callback
 
@@ -521,66 +586,6 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long) -> Func :
     pop(a, tmp1)                ;POPPING CRSP
     mov(a, reg-mem-access(0), do-BOOLREF(a, CONST(a, tmp1, 1))) ; RETURN TRUE
     ret(a)
-
-;Accesses and state saving/restoring
-
-defn CONST (a:Assembler, x:Gp, id:Int|Long) -> Gp :
-  mov(a, x, id)
-
-;Addressing for register from registers vector
-defn reg-mem-access (r:Int) -> MemPtr :
-  MemPtr(registers, r * SIZEOF-LONG)    
-;Access register from registers vector or x86 register if possible with mem-only? override
-defn reg-access (r:Int, mem-only?:True|False) -> Gp|MemPtr :
-  reg-mem-access(r) when (mem-only? or r >= num-reg-regs) else reg-regs[r]
-;Set register into registers vector or x86 register if possible with mem-only? override
-defn do-SET-REG (a:Assembler, r:Int, v:Gp, mem-only?:True|False) -> False :
-  mov(a, reg-access(r, mem-only?), v)
-  dump(a, "  SET-REG[%d,%d] = %p\n", [r, 1 when mem-only? else 0, v]) when tracing?
-  false
-defn do-SET-REG (a:Assembler, r:Int, v:Gp -> Gp, mem-only?:True|False) -> False :
-  ; val rv = (mov(a, reg-access(r, mem-only?), v(tmp1)), tmp1)
-  val rv = match(reg-access(r, mem-only?)) :
-    (acc:Gp)     : v(acc)
-    (acc:MemPtr) : (mov(a, acc, v(tmp1)), tmp1)
-  ; mov(a, reg-access(r, mem-only?), v)
-  dump(a, "  SET-REG[%d,%d] = %p\n", [r, 1 when mem-only? else 0, rv]) when tracing?
-  false
-
-;Save/Restore to VMState
-defn SAVE-STATE-ONLY (a:Assembler) :
-  set-stack-pointer(a, stack-pointer)
-
-defn SAVE-STATE (a:Assembler) :
-  SAVE-STATE-ONLY(a)
-  etc-save-registers(a)
-
-defn RESTORE-STATE (a:Assembler) :
-  etc-restore-registers(a)
-  untag-stack(a, stk, get-current-stack(a, tmp1))
-  get-stack-pointer(a, stack-pointer)
-
-;Addressing for local from locals in stack frame
-defn local-mem-access (l:Int) -> MemPtr :
-  MemPtr(stack-pointer, l * SIZEOF-LONG + STACK-FRAME-SLOTS-OFFSET)    
-
-;Save x86 register cache to memory vector for VM locals
-defn save-local-registers (a:Assembler) :
-  for i in 0 to num-local-regs do :
-    ; dump(a, "SAVING LREG[%d] %p\n", [i, local-regs[i]])
-    mov(a, local-mem-access(i), local-regs[i])
-
-;Restore x86 register cache from memory vector for VM locals
-defn restore-local-registers (a:Assembler) :
-  for i in 0 to num-local-regs do :
-    mov(a, local-regs[i], local-mem-access(i))
-    ; dump(a, "RESTORING LREG[%d] %p\n", [i, local-regs[i]])
-
-;Restore x86 register cache from memory vector for VM registers
-defn restore-vm-registers (a:Assembler) :
-  for i in 0 to num-reg-regs do :
-    mov(a, reg-regs[i], reg-mem-access(i))
-    ; dump(a, "RESTORING RREG[%d] %p\n", [i, reg-regs[i]])
 
 ;Stack extension support
 
@@ -636,12 +641,13 @@ defn compute-stack-limit (a:Assembler, dst:Gp) -> Gp :
   add(a, dst, tmp1)
   dst
 
-;VM Instruction coverage for testing
+;;; VM Instruction coverage for testing
 
 val covered = IntSet()
 public defn opcode-coverage () -> IntSet : covered
 
-;Encode function aka JITting
+;;; Encode function aka JITting
+
 ;Encoding is as similar as possible to encode in stz-vm-encoding.stanza
 ;  except for the use of labels instead of buffer offsets
 
@@ -1855,6 +1861,8 @@ public defn encode (fid:Int, func:VMFunction,
         match(entry:StackTraceEntry) :
           dump(a, ">>> %s\n", [printf-format(to-string(entry))]) when (debugging? or tracing?)
 
+      ;Fast version of CallCIns for when arguments completely fit in C arg registers
+      ;This avoids shuttling arguments in VM registers and dynamically unpicking with c-trampoline
       defn jit-simple-callc (ins:CallCIns, records:CallCRecords) :
         ; dump(a, "==> CALLC %d %d\n", [num-int-args(records), num-real-args(records)])
         println(JIT-LOG-FILE, "CALLC %_ %_" % [num-int-args(records), num-real-args(records)]) when dumping-opcodes?
