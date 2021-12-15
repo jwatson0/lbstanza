@@ -35,8 +35,8 @@ val reg-regs? = true            ;Use x86 registers for first few vm registers?
 val debugging? = false          ;General debugging output?
 var tracing?:True|False = false ;Tracing execution of vm instructions and writes?
 val jit-callc? = true           ;JIT simple callc invocations?
-val disassembling? = true       ;Disassemble JITd code?
-val dumping-opcodes? = true     ;Dumping opcodes within disassembled code
+val disassembling? = false      ;Disassemble JITd code?
+val dumping-opcodes? = false    ;Dumping opcodes within disassembled code
 
 ;Resolver api and structures
 
