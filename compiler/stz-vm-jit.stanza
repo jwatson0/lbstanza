@@ -420,6 +420,12 @@ defn restore-vm-registers (a:Assembler) :
     mov(a, reg-regs[i], reg-mem-access(i))
     ; dump(a, "RESTORING RREG[%d] %p\n", [i, reg-regs[i]])
 
+;save x86 register cache to memory vector for VM registers
+defn save-vm-registers (a:Assembler) :
+  for i in 0 to num-reg-regs do :
+    mov(a, reg-mem-access(i), reg-regs[i])
+    ; dump(a, "SAVING RREG[%d] %p\n", [i, reg-regs[i]])
+
 ;;; Tagging
 
 val INT-TAG-BITS    = 0
@@ -612,6 +618,7 @@ public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func)
     set-pc(a, end-label)
     ;Swap stack and registers
     save-local-registers(a)
+    save-vm-registers(a)
     swap-current-and-system-state(a)
     ;Set arguments
     get-frames(a, stack-pointer)
@@ -630,6 +637,7 @@ public defn make-extend-stack-return (rt:JitRuntime) -> Func :
     set-stack-pointer(a, CONST(a, tmp1, 0))
     ;Swap stack and registers
     swap-current-and-system-state(a)
+    restore-vm-registers(a)
     restore-local-registers(a)
     ;Continue where we were
     get-pc(a, tmp2)
