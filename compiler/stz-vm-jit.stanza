@@ -30,8 +30,8 @@ public var JIT-LOG-FILE:FileOutputStream = STANDARD-OUTPUT-STREAM as FileOutputS
 
 ;Configuration
 
-val local-regs? = true          ;Use x86 registers for first few vm locals?
-val reg-regs? = true            ;Use x86 registers for first few vm registers?
+val local-regs? = false         ;Use x86 registers for first few vm locals?
+val reg-regs? = false           ;Use x86 registers for first few vm registers?
 val debugging? = false          ;General debugging output?
 var tracing?:True|False = false ;Tracing execution of vm instructions and writes?
 val jit-callc? = true           ;JIT simple callc invocations?
@@ -574,6 +574,7 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long) -> Func :
     val init-id = mov(a, tmp3, c-params[1]) ;Init ID is second C argument
     mov(a, tmp1, MemPtr(rsp, 0))
     mov(a, vmstate, vms)                              ;Cache VMState
+    ; dump(a, "$$> LAUNCH %d\n", [init-id])
     ; mov(a, tmp3, 0) ;BREAK
     ; mov(a, MemPtr(tmp3, 0), tmp3) ;BREAK
     get-registers(a, registers)                       ;Cache registers
@@ -587,10 +588,12 @@ public defn make-jit-launch (rt:JitRuntime, vms:Long) -> Func :
     mov(a, tmp1, MemPtr(functions, init-id, 3, 0)) ;Load initial function
     jmp(a, tmp1)                ;Launch!
     bind(a, ret-label)          ;Return address     
-    restore-local-registers(a)  ;Put registers back for return value
+    restore-local-registers(a)  ;Put locals back
+    save-vm-registers(a)        ;Put vm registers back for return value    
     SAVE-STATE-ONLY(a)          ;Save from cache
     pop(a, tmp1)                ;POPPING CRSP
-    mov(a, reg-mem-access(0), do-BOOLREF(a, CONST(a, tmp1, 1))) ; RETURN TRUE
+    ; mov(a, reg-mem-access(0), do-BOOLREF(a, CONST(a, tmp1, 1))) ; RETURN TRUE
+    ; dump(a, "<$$ LAUNCH %d\n", [init-id])
     ret(a)
 
 ;Stack extension support
@@ -668,9 +671,9 @@ public defn encode (fid:Int, func:VMFunction,
   val extend-stack-launch-value = value(extend-stack-launch)
   val trace-entry-table = Vector<TraceTableEntry>()
   val f = within (code, a) = gen-code(rt, disassembling?, JIT-LOG-FILE) :
-    ; tracing? = fid == 3272
+    ; tracing? = fid == 4510
     println(JIT-LOG-FILE, "--- ENCODING %_" % [fid]) when (dumping-opcodes? or debugging? or disassembling?)
-    dump(a, "--- FID %d\n", [fid]) when tracing?
+    dump(a, "--> FID %d\n", [fid]) ; when tracing?
 
     defn CONST (x:Gp, id:Int|Long) -> Gp : (mov(a, x, to-long(id)), x)
     defn CONST (id:Int|Long) -> Gp : CONST(tmp1, id)
@@ -969,6 +972,7 @@ public defn encode (fid:Int, func:VMFunction,
           jmp(a, tmp1)
           bind(a, continue-label)
         RETURN-OPCODE : 
+          dump(a, "<-- FID %d\n", [fid]) ; when tracing?
           get-return(a, tmp1)
           jmp(a, tmp1)
         DUMP-OPCODE :
@@ -991,6 +995,8 @@ public defn encode (fid:Int, func:VMFunction,
           bind(a, tgts)
         FLUSH-VM-OPCODE :
           SAVE-STATE-ONLY(a)
+          save-vm-registers(a)
+          save-local-registers(a)
           SET-LOCAL(value, vmstate)
         C-RSP-OPCODE :
           SET-LOCAL(value, GET-CRSP(tmp1))
@@ -1049,9 +1055,11 @@ public defn encode (fid:Int, func:VMFunction,
           subsd(a, xmm0, LOCAL-DOUBLE(xmm1, value))
           SET-LOCAL-DOUBLE(x, xmm0)
         CONV-OPCODE-BYTE-FLOAT :
+          xor-op(a, tmp1, tmp1) 
           cvtss2si(a, tmp1b, LOCAL-FLOAT(xmm0, value))
           SET-LOCAL-BYTE(x, tmp1)
         CONV-OPCODE-BYTE-DOUBLE :
+          xor-op(a, tmp1, tmp1) 
           cvtsd2si(a, tmp1, LOCAL-DOUBLE(xmm0, value))
           SET-LOCAL-BYTE(x, tmp1)
         CONV-OPCODE-INT-BYTE :
@@ -1059,9 +1067,11 @@ public defn encode (fid:Int, func:VMFunction,
           mov(a, tmp1b, LOCAL-BYTE(tmp1b, value))
           SET-LOCAL-INT(x, tmp1)
         CONV-OPCODE-INT-FLOAT :
+          xor-op(a, tmp1, tmp1)
           cvtss2si(a, tmp1i, LOCAL-FLOAT(xmm0, value))
           SET-LOCAL-INT(x, tmp1)
         CONV-OPCODE-INT-DOUBLE :
+          xor-op(a, tmp1, tmp1)
           cvtsd2si(a, tmp1i, LOCAL-DOUBLE(xmm0, value))
           SET-LOCAL-INT(x, tmp1)
         CONV-OPCODE-LONG-BYTE :
@@ -1090,7 +1100,8 @@ public defn encode (fid:Int, func:VMFunction,
           cvtsi2sd(a, xmm0, LOCAL(tmp1, value))
           SET-LOCAL-DOUBLE(x, xmm0)
         CONV-OPCODE-DOUBLE-INT :
-          cvtsi2sd(a, xmm0, LOCAL(tmp1, value))
+          xor-op(a, tmp1, tmp1)
+          cvtsi2sd(a, xmm0, LOCAL-INT(tmp1i, value))
           SET-LOCAL-DOUBLE(x, xmm0)
         CONV-OPCODE-DOUBLE-LONG :
           cvtsi2sd(a, xmm0, LOCAL(tmp2, value))
@@ -1867,12 +1878,12 @@ public defn encode (fid:Int, func:VMFunction,
 
       defn before-call-dump (entry:False|StackTraceEntry) :
         match(entry:StackTraceEntry) :
-          dump(a, ">>> %s\n", [printf-format(to-string(entry))]) when (debugging? or tracing?)
+          dump(a, ">>> %s\n", [printf-format(to-string(entry))]) ; when (debugging? or tracing?)
 
       ;Fast version of CallCIns for when arguments completely fit in C arg registers
       ;This avoids shuttling arguments in VM registers and dynamically unpicking with c-trampoline
       defn jit-simple-callc (ins:CallCIns, records:CallCRecords) :
-        ; dump(a, "==> CALLC %d %d\n", [num-int-args(records), num-real-args(records)])
+        dump(a, "==> CALLC %d %d\n", [num-int-args(records), num-real-args(records)])
         println(JIT-LOG-FILE, "CALLC %_ %_" % [num-int-args(records), num-real-args(records)]) when dumping-opcodes?
 
         before-call-dump(trace-entry(ins))
@@ -1927,6 +1938,8 @@ public defn encode (fid:Int, func:VMFunction,
                 SET-LOCAL(slot(x), rax)         ;TODO: MOVE RAX OUT OF HERE
               (l:FRegLoc) :
                 SET-LOCAL-DOUBLE(slot(x), xmm0) ;TODO: MOVE XMM0 OUT OF HERE
+
+        dump(a, "<== CALLC %d %d\n", [num-int-args(records), num-real-args(records)])
 
       ;Encode each instruction
       defn emit-ins (ins:VMIns) :

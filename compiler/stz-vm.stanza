@@ -491,7 +491,7 @@ public lostanza defn run-bytecode (vm:ref<VirtualMachine>, start-func:ref<Int>) 
   VIRTUAL-MACHINE = vm
   register-array = vm.vmstate.registers
   initialize-stack-pointer(vm)
-  set-starting-func(vm, start-func)
+  ; set-starting-func(vm, start-func)
   ; call-c vmloop(vm.vmstate, call-prim crsp() as long)
   val vms = new Long{vm.vmstate as long}
   val func = jit-init-launcher(vm)
@@ -507,25 +507,27 @@ public lostanza defn call-extern (extern-index:int) -> int :
   ;Debug
   ;Retrieve the function id for this extern index
   val fid = get(vm.vmtable.extern-defn-funcs, new Int{extern-index})
-  ;Set the returnpc to -1, so that execution will return here.
-  var saved-ret:long
-  let :
-    val stk:ptr<Stack> = untag(vm.vmstate.current-stack)
-    val sp = stk.stack-pointer
-    saved-ret = sp.return
-    sp.return = -1
+  ; ;Set the returnpc to -1, so that execution will return here.
+  ; var saved-ret:long
+  ; ; let :
+  ;   val stk:ptr<Stack> = untag(vm.vmstate.current-stack)
+  ;   val sp = stk.stack-; pointer
+  ;   saved-ret = sp.return
+  ;   sp.return = -1
   ;Set starting function and execute
-  set-starting-func(vm, fid)
+  ; call-c printf("**> CALL-EXTERN %d\n", fid)
+  ; set-starting-func(vm, fid)
+  ; call-c vmloop(vm.vmstate, call-prim crsp() as long)
   val vms = new Long{vm.vmstate as long}
   val func = jit-init-launcher(vm)
   val res = call(func, call-prim crsp(), fid.value as long as ptr<?>)
-  ; call-c vmloop(vm.vmstate, call-prim crsp() as long)
-  ;Restore the returnpc and return
-  let :
-    val stk:ptr<Stack> = untag(vm.vmstate.current-stack)
-    val sp = stk.stack-pointer
-    sp.return = saved-ret
-    return 0
+  ; call-c printf("<** CALL-EXTERN %d\n", fid)
+  ; ;Restore the returnpc and return
+  ; let :
+  ;   val stk:ptr<Stack> = untag(vm.vmstate.current-stack)
+  ;   val sp = stk.stack-pointer
+  ;   sp.return = saved-ret
+  return 0
 
 ;Called by the extern defn callbacks. Retrieve the registers array
 ;from the currently active virtual machine.
