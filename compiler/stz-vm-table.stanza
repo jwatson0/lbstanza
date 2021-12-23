@@ -5,7 +5,9 @@ defpackage stz/vm-table :
   import stz/typeset
   import stz/vm
   import stz/algorithms
-  import stz/vm-jit
+  import stz/vm-encoder
+  import stz/jit-encoder
+  import stz/cvm-encoder
   import stz/stable-arrays
   import stz/utils
   import stz/dyn-tree
@@ -14,6 +16,7 @@ defpackage stz/vm-table :
   import core/stack-trace
 
 extern memcpy : (ptr<?>, ptr<?>, long) -> int
+extern printf: (ptr<byte>, ? ...) -> int
 
 ;============================================================
 ;================ Definition of all Tables ==================
@@ -40,7 +43,11 @@ public lostanza deftype VMTable :
   var data-positions:ref<StableIntArray>
   data:ref<Buffer>
 
+  ;Bytecode
+  bytecode:ref<Buffer>
+
   ;Functions
+  var function-addresses:ref<StableIntArray>
   var functions:ref<StableLongArray>
 
   ;Externs
@@ -81,7 +88,11 @@ public lostanza defn VMTable (class-table:ref<ClassTable>, branch-table:ref<Bran
     StableIntArray(new Int{32}, new Int{-1}),
     Buffer(),
 
+    ;ByteCode
+    Buffer(),
+
     ;Functions
+    StableIntArray(new Int{1024}, new Int{-1}), 
     StableLongArray(new Int{1024}, new Long{-1L}),
 
     ;Externs
@@ -448,11 +459,24 @@ public lostanza defn load-callback (vmt:ref<VMTable>, callback-index:ref<Int>, f
 ;============================================================
 
 public lostanza defn load-function (vmt:ref<VMTable>, id:ref<Int>, ef:ref<EncodedFunction>) -> ref<False> :
-  val f = value(ef)
-  vmt.functions = put(vmt.functions, id, f, new Long{0})
+  var res-pos:ref<Int> = new Int{0}
+  if jit?(ef) == true :
+    val f = value(ef)
+    vmt.functions = put(vmt.functions, id, f, new Long{0})
+  else :
+    ;Load bytecode into bytecode vector
+    val buffer = func(ef) as ref<ByteBuffer>
+    val num-bytes = length(buffer)
+    val offset = alloc(vmt.bytecode, num-bytes.value)
+    call-c memcpy(vmt.bytecode.mem + offset, data(buffer), num-bytes.value)
 
+    ;Put into function table
+    val pos = new Int{(offset / 4) as int}
+    vmt.function-addresses = put(vmt.function-addresses, id, pos, new Int{-1})
+    res-pos = pos
+ 
   ;Load fileinfos into fileinfo table
-  load-trace-entries(vmt, trace-entries(ef), new Int{0})
+  load-trace-entries(vmt, trace-entries(ef), res-pos)
   
   return false
 

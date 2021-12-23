@@ -8,12 +8,15 @@ defpackage stz/vm :
   import stz/vm-ids
   import stz/dl-ir
   import stz/basic-ops
-  import stz/vm-jit
+  import stz/vm-encoder
+  import stz/cvm-encoder
+  import stz/jit-encoder
   import stz/stable-arrays
   import stz/branch-table
   import stz/backend
   import stz/utils
   import stz/asmjit
+  import stz/params
 
 ;<doc>=======================================================
 ;================= Virtual Machine Interface ================
@@ -263,6 +266,8 @@ public lostanza deftype VirtualMachine :
   linker: ref<Linker>
   vmstate: ptr<VMState>
   var core-loaded?: ref<True|False>
+  encoder : ref<VMEncoder>
+  jit? : ref<True|False>
   jit-runtime: ref<JitRuntime>
   jit-init-launcher: ref<Func>
   jit-extend-stack-launcher: ref<Func>
@@ -361,6 +366,9 @@ lostanza defn vmtable (vm:ref<VirtualMachine>) -> ref<VMTable> :
 lostanza defn backend (vm:ref<VirtualMachine>) -> ref<Backend> :
   return vm.backend
 
+lostanza defn encoder (vm:ref<VirtualMachine>) -> ref<VMEncoder> :
+  return vm.encoder
+
 lostanza defn jit-runtime (vm:ref<VirtualMachine>) -> ref<JitRuntime> :
   return vm.jit-runtime
 
@@ -376,13 +384,17 @@ lostanza defn jit-extend-stack-returner (vm:ref<VirtualMachine>) -> ref<Func> :
 lostanza defn update-vmstate (vm:ref<VirtualMachine>) -> ref<False> :
   val vms = vm.vmstate
   val vmt = vm.vmtable
+  vms.instructions = vmt.bytecode.mem
   vms.global-offsets = vmt.global-offsets.data
   vms.global-mem = vmt.globals.mem
   vms.const-table = vmt.consts.mem
   vms.const-mem = vmt.consts-data.mem
   vms.data-offsets = vmt.data-positions.data
   vms.data-mem = vmt.data.mem
-  vms.functions = vmt.functions.data
+  if vm.jit? == true :
+    vms.functions = vmt.functions.data
+  else :
+    vms.functions = vmt.function-addresses.data as ptr<long>
   vms.trie-table = trie-table-data(branch-table(vm))
   return false
 
@@ -421,8 +433,14 @@ public lostanza defn VirtualMachine (backend:ref<Backend>) -> ref<VirtualMachine
   val init-launcher = make-jit-launch(rt, new Long{vmstate as long})
   val extend-stack-returner = make-extend-stack-return(rt)
   val extend-stack-launcher = make-extend-stack-launch(rt, extend-stack-returner)
-  val vm = new VirtualMachine{backend, vmtable, VMIds(), linker, vmstate, false, rt,
-                              init-launcher, extend-stack-launcher, extend-stack-returner}
+  val jit? = EXPERIMENTAL
+  var encoder:ref<VMEncoder>
+  if jit? == true :
+    encoder = JITEncoder(rt, extend-stack-launcher, extend-stack-returner)
+  else :
+    encoder = CVMEncoder()
+  val vm = new VirtualMachine{backend, vmtable, VMIds(), linker, vmstate, false,
+                              encoder, jit?, rt, init-launcher, extend-stack-launcher, extend-stack-returner}
   update-vmstate(vm)
   return vm
 
@@ -487,18 +505,20 @@ protected lostanza var register-array:ptr<long>
 
 protected extern printf: (ptr<byte>, ? ...) -> int
 
-public lostanza defn run-bytecode (vm:ref<VirtualMachine>, start-func:ref<Int>) -> ref<Long> :
+public lostanza defn run-bytecode (vm:ref<VirtualMachine>, start-func:ref<Int>) -> ref<False> :
   VIRTUAL-MACHINE = vm
   register-array = vm.vmstate.registers
   initialize-stack-pointer(vm)
-  ; set-starting-func(vm, start-func)
-  ; call-c vmloop(vm.vmstate, call-prim crsp() as long)
-  val vms = new Long{vm.vmstate as long}
-  val func = jit-init-launcher(vm)
-  val res = call(func, call-prim crsp(), start-func.value as long as ptr<?>)
+  if vm.jit? == true :
+    val vms = new Long{vm.vmstate as long}
+    val func = jit-init-launcher(vm)
+    call(func, call-prim crsp(), start-func.value as long as ptr<?>)
+  else :
+    set-starting-func(vm, start-func)
+    call-c vmloop(vm.vmstate, call-prim crsp() as long)
   null-stack-pointer(vm)
   VIRTUAL-MACHINE = false
-  return res
+  return false
 
 ;Called by the extern defn callbacks defined in the generated bindings
 public lostanza defn call-extern (extern-index:int) -> int :
@@ -507,26 +527,24 @@ public lostanza defn call-extern (extern-index:int) -> int :
   ;Debug
   ;Retrieve the function id for this extern index
   val fid = get(vm.vmtable.extern-defn-funcs, new Int{extern-index})
-  ; ;Set the returnpc to -1, so that execution will return here.
-  ; var saved-ret:long
-  ; ; let :
-  ;   val stk:ptr<Stack> = untag(vm.vmstate.current-stack)
-  ;   val sp = stk.stack-; pointer
-  ;   saved-ret = sp.return
-  ;   sp.return = -1
-  ;Set starting function and execute
-  ; call-c printf("**> CALL-EXTERN %d\n", fid)
-  ; set-starting-func(vm, fid)
-  ; call-c vmloop(vm.vmstate, call-prim crsp() as long)
-  val vms = new Long{vm.vmstate as long}
-  val func = jit-init-launcher(vm)
-  val res = call(func, call-prim crsp(), fid.value as long as ptr<?>)
-  ; call-c printf("<** CALL-EXTERN %d\n", fid)
-  ; ;Restore the returnpc and return
-  ; let :
-  ;   val stk:ptr<Stack> = untag(vm.vmstate.current-stack)
-  ;   val sp = stk.stack-pointer
-  ;   sp.return = saved-ret
+  if vm.jit? == true :
+    call(jit-init-launcher(vm), call-prim crsp(), fid.value as long as ptr<?>)
+  else :
+    ;Set the returnpc to -1, so that execution will return here.
+    var saved-ret:long
+    let :
+      val stk:ptr<Stack> = untag(vm.vmstate.current-stack)
+      val sp = stk.stack-pointer
+      saved-ret = sp.return
+      sp.return = -1
+    ;Set starting function and execute
+    set-starting-func(vm, fid)
+    call-c vmloop(vm.vmstate, call-prim crsp() as long)
+    ;Restore the returnpc and return
+    let :
+      val stk:ptr<Stack> = untag(vm.vmstate.current-stack)
+      val sp = stk.stack-pointer
+      sp.return = saved-ret
   return 0
 
 ;Called by the extern defn callbacks. Retrieve the registers array
@@ -552,9 +570,9 @@ lostanza defn null-stack-pointer (vm:ref<VirtualMachine>) -> ref<False> :
 ;Set the starting pc of the virtual machine to fid. The virtual machine
 ;will start executing from the given function.
 lostanza defn set-starting-func (vm:ref<VirtualMachine>, fid:ref<Int>) -> ref<False> :
-  val pc = get(vm.vmtable.functions,fid).value
+  val pc = get(vm.vmtable.function-addresses,fid).value
   val stk:ptr<Stack> = untag(vm.vmstate.current-stack)
-  stk.pc = pc
+  stk.pc = pc * 4
   return false
 
 ;============================================================
@@ -1228,8 +1246,7 @@ public defn load (vm:VirtualMachine, vmps:Collection<VMPackage>, keep-existing-g
     ;Load functions
     val encoding-resolver = EncodingResolver(vm-ids, branch-table(vm), live-map-table(linker(vm)))
     for f in funcs(load-unit) do :
-      val ef = encode(id(f), func(f), jit-runtime(vm), encoding-resolver,
-                      jit-extend-stack-launcher(vm), jit-extend-stack-returner(vm), backend(vm))
+      val ef = encode(encoder(vm), id(f), func(f), encoding-resolver, backend(vm))
       maybe-delete-old-function(vmt, jit-runtime(vm), id(f))
       load-function(vmt, id(f), ef)
     val coverage = opcode-coverage()
@@ -1281,7 +1298,7 @@ public defn init-package (vm:VirtualMachine, package:Symbol) -> True|False :
   match(f:Int) :
     val trace? = false
     if package == `core :
-      val res = run-bytecode(vm, f)
+      run-bytecode(vm, f)
       ; println("RAN CORE %_" % [res])
       set-core-loaded?(vm, true)      
       true
