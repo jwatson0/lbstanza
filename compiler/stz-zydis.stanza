@@ -30,11 +30,11 @@ lostanza defn delete (dec:ref<Decoder>) -> ref<False> :
   call-c zydis_delete(dec.value)
   return false
 
-public defn disassemble (f:Long, len:Int) :
+public defn disassemble (f:Long, len:Int, out:FileOutputStream) :
   val dec = Decoder(f, len)
   let loop () :
     if decode(dec) :
-      println(buffer(dec))
+      println(out, buffer(dec))
       loop()
   delete(dec)      
 
