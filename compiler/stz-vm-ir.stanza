@@ -22,7 +22,9 @@ public val STACK-TYPE = 6
 public val FN-TYPE = 7
 public val TYPE-TYPE = 8
 public val LIVENESS-TRACKER-TYPE = 9
-public val NUM-BUILTIN-TYPES = 10
+public val NUM-BUILTIN-CONCRETE-TYPES = 10
+public val UNIQUE-TYPE = 10
+public val NUM-BUILTIN-TYPES = 11
 
 public val EXTEND-HEAP-FN = 0
 public val EXTEND-STACK-FN = 1
@@ -45,6 +47,7 @@ public defstruct VMPackage :
   methods: Tuple<VMMethod>
   externs: Tuple<VMExtern>
   extern-defns: Tuple<VMExternDefn>
+  debug-table: VMDebugInfoTable
 
 public deftype VMImm
 public defstruct Local <: VMImm :
@@ -295,6 +298,21 @@ public defstruct ConvOp <: VMOp
 public defstruct InterpretOp <: VMOp
 public defstruct DerefOp <: VMOp
 
+;------------------------------------------------------------
+;------------------- VM Debug Info --------------------------
+;------------------------------------------------------------
+
+;Table holding the definition information for identifiers.
+public defstruct VMDebugInfoTable :
+  entries: Tuple<VMDebugInfo>
+
+;Represents the original name and definition location
+;of each identifier.
+public defstruct VMDebugInfo :
+  id:Int
+  name:String|False
+  info:FileInfo|False
+
 ;============================================================
 ;==================== Convenience ===========================
 ;============================================================
@@ -409,7 +427,8 @@ public deftype VMItem :
   VMExtern <: VMItem
   VMExternDefn <: VMItem
   VMFunction <: VMItem
-
+  
+;Maps 'mapf' over all immediate VMItem fields in the given VMItem. 
 public defn vm-map<?T> (mapf:VMItem -> VMItem, item:VMItem&?T) -> T :
   defn h<?T> (x:VMItem&?T) : mapf(x) as VMItem&T
   defn h<?T> (x:KeyValue<Int,VMItem&?T>) : key(x) => h(value(x))
@@ -467,6 +486,11 @@ public defn vm-map<?T> (mapf:VMItem -> VMItem, item:VMItem&?T) -> T :
     (x:LiveIns) : LiveIns(h(xs(x)))
     (x:VMIns) : x
 
+;Maps f over any immediate "global identifiers" contained within the given VMItem.
+;A global identifier is any Int that refers to a global VMPackage definition.
+;Note that function-local identifiers are not mapped over:
+;- VMDef identifiers are not included.
+;- Label/Goto/Branch identifiers are not included.
 public defn map-id<?T> (f:Int -> Int, item:VMItem&?T) -> T :
   defn h (x:Int) : f(x)
   defn h (x:False) : x
@@ -554,7 +578,8 @@ defmethod print (o:OutputStream, p:VMPackage) :
     classes(p)
     funcs(p)
     methods(p)
-    extern-defns(p)]
+    extern-defns(p)
+    entries(debug-table(p))]
   do(lnprint{o2, _}, xs)
 
 defmethod print (o:OutputStream, d:VMDef) :
@@ -635,6 +660,14 @@ defmethod print (o:OutputStream, x:VMImm) :
     (x:GlobalId) : "G%_" % [id(x)]
     (x:DataId) : "D%_" % [id(x)]
     (x:ConstId) : "C%_" % [id(x)]
+
+defmethod print (o:OutputStream, x:VMDebugInfoTable) :
+  val o2 = IndentedStream(o)
+  print(o, "debuginfo table :")
+  do(lnprint{o2, _}, entries(x))
+
+defmethod print (o:OutputStream, x:VMDebugInfo) :
+  print(o, "debuginfo %_ (name = %~)" % [id(x), name(x)])
 
 defmethod print (o:OutputStream, i:VMIns) :
   defn P (x) : print(o, x)
@@ -939,6 +972,10 @@ defsyntax vmcode :
   defrule vmmethod = (method ?multi:#int (?types:#typeset ...) : goto ?fid:#int) :
     VMMethod(false, multi, to-tuple(types), fid)
 
+  defproduction debuginfo : VMDebugInfo
+  defrule debuginfo = (debuginfo ?id:#int! (name = ?name:#string-or-false)) :
+    VMDebugInfo(id, name, closest-info())
+
   import (import export) from dl-ir
   public defproduction vmpackage : VMPackage
   defrule vmpackage = (package ?name:#symbol :
@@ -955,14 +992,15 @@ defsyntax vmcode :
     val es = to-tuple(filter-by<VMExtern>(stmts))
     val efs = to-tuple(filter-by<VMExternDefn>(stmts))
     val ms = to-tuple(filter-by<VMMethod>(stmts))
-    VMPackage(io, init, gs, ds, cts, cs, fs, ms, es, efs)
+    val dbg = to-tuple(filter-by<VMDebugInfo>(stmts))
+    VMPackage(io, init, gs, ds, cts, cs, fs, ms, es, efs, VMDebugInfoTable(dbg))
 
   defproduction init? : Int|False
   defrule init? = (init = ?n:#int) : n
   defrule init? = () : false
 
   defproduction tstmt : VMGlobal|VMClass|VMDefn|VMExtern|VMExternDefn|VMData|
-                        VMConst|VMMethod|Import|Export
+                        VMConst|VMMethod|Import|Export|VMDebugInfo
   defrule tstmt = (?x:#global) : x
   defrule tstmt = (?x:#data) : x
   defrule tstmt = (?x:#const) : x
@@ -973,6 +1011,7 @@ defsyntax vmcode :
   defrule tstmt = (?x:#vmmethod) : x
   defrule tstmt = (?x:#import) : x
   defrule tstmt = (?x:#export) : x
+  defrule tstmt = (?x:#debuginfo) : x
   fail-if tstmt = () : VME(closest-info(), "Expected a top-level statement here.")
 
   ;===== Primitives =====
@@ -987,6 +1026,9 @@ defsyntax vmcode :
 
   defproduction symbol : Symbol
   defrule symbol = (?x) when unwrap-token(x) is Symbol : unwrap-token(x)
+
+  defproduction string-or-false: String|False
+  defrule string-or-false = (?x) when unwrap-token(x) is String|False : unwrap-token(x)
 
   ;===== Failure =====
   defproduction imm! : VMImm
