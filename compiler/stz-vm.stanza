@@ -656,7 +656,7 @@ lostanza defn collect-stack-trace-entries (stack:ptr<Stack>,
     loop (sp:ptr<StackFrame>) :
       ;Store in return buffer
       ;if it exists in the file info table
-      val ret = new Int{(sp.return / 4L) as int}
+      val ret = new Long{ sp.return }
       match(get?(vmtable.trace-table, ret)) :
         (info:ref<StackTraceEntry>) : add(buffer, info)
         (info) : ()

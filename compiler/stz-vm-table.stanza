@@ -58,7 +58,7 @@ public lostanza deftype VMTable :
   var extern-defn-funcs:ref<StableIntArray>
 
   ;Trace Entries
-  trace-table:ref<IntTable<StackTraceEntry>>           
+  trace-table:ref<HashTable<Long,StackTraceEntry>>           
 
 public lostanza defn functions (vmt:ref<VMTable>) -> ref<StableLongArray> :
   return vmt.functions
@@ -103,7 +103,7 @@ public lostanza defn VMTable (class-table:ref<ClassTable>, branch-table:ref<Bran
     StableIntArray(new Int{32}, new Int{-1}),
     
     ;Trace Table
-    IntTable<StackTraceEntry>()}
+    HashTable<Long,StackTraceEntry>()}
 
 ;============================================================
 ;================= Class Display Analysis ===================
@@ -403,13 +403,13 @@ defn emit-chars (buffer:ByteBuffer, s:String) :
 ;============================================================
 ;=================== Build Trace Table ======================
 ;============================================================
-defn load-trace-entries (vmt:VMTable, entries:Seqable<TraceTableEntry>, offset:Int) :
+defn load-trace-entries (vmt:VMTable, entries:Seqable<TraceTableEntry>, offset:Long) :
   val trace-table = trace-table(vmt)
   for e in entries do :
-    val address = pc(e) + offset
+    val address = to-long(pc(e)) + offset
     trace-table[address] = entry(e)
 
-lostanza defn trace-table (vmt:ref<VMTable>) -> ref<IntTable<StackTraceEntry>> :
+lostanza defn trace-table (vmt:ref<VMTable>) -> ref<HashTable<Long,StackTraceEntry>> :
   return vmt.trace-table
 
 ;============================================================
@@ -466,10 +466,12 @@ public lostanza defn load-callback (vmt:ref<VMTable>, callback-index:ref<Int>, f
 ;============================================================
 
 public lostanza defn load-function (vmt:ref<VMTable>, id:ref<Int>, ef:ref<EncodedFunction>) -> ref<False> :
-  var res-pos:ref<Int> = new Int{0}
+  var res-pos:ref<Long> = new Long{0}
   if jit?(ef) == true :
     val f = value(ef)
     vmt.functions = put(vmt.functions, id, f, new Long{0})
+    res-pos = f
+    
   else :
     ;Load bytecode into bytecode vector
     val buffer = func(ef) as ref<ByteBuffer>
@@ -480,7 +482,7 @@ public lostanza defn load-function (vmt:ref<VMTable>, id:ref<Int>, ef:ref<Encode
     ;Put into function table
     val pos = new Int{(offset / 4) as int}
     vmt.function-addresses = put(vmt.function-addresses, id, pos, new Int{-1})
-    res-pos = pos
+    res-pos = new Long{ offset }
  
   ;Load fileinfos into fileinfo table
   load-trace-entries(vmt, trace-entries(ef), res-pos)

@@ -673,15 +673,15 @@ defmethod encode (enc:JITEncoder, fid:Int, func:VMFunction, resolver:EncodingRes
     defn const-table (dst:Gp) :    get-const-table(a, dst)
     defn const-mem (dst:Gp) :      get-const-mem(a, dst)
 
-    ;Encode instructions into this byte buffer
-    defn buffer-pos () : 0 ;TODO: REMOVE
+    val call-labels = Vector<Label>()
+    defn last-call-label () : call-labels[length(call-labels) - 1]
 
     ;Accumulate file information entries for implementing
     ;stack traces.
     defn record-trace-entry (entry:StackTraceEntry|False) :
       match(entry:StackTraceEntry) :
         dump(a, "+++ %s\n", [printf-format(to-string(entry))]) when debugging?
-        add(trace-entry-table, TraceTableEntry(buffer-pos(), entry))
+        add(trace-entry-table, TraceTableEntry(label-offset(code, last-call-label()), entry))
 
     ;Calculation of sizes
     defn object-size (num-obj:Int, size-on-heap:Int) :
@@ -850,6 +850,7 @@ defmethod encode (enc:JITEncoder, fid:Int, func:VMFunction, resolver:EncodingRes
       PUSH-FRAME(num-locals, end-label)
       do-tcall(f)
       bind(a, end-label)
+      add(call-labels, end-label)
 
     ;Opcode tracing support -- meant to compare against golden models like CVM
     
@@ -944,6 +945,7 @@ defmethod encode (enc:JITEncoder, fid:Int, func:VMFunction, resolver:EncodingRes
           mov(a, tmp2, MemPtr(functions, tmp1, 3, 0))
           jmp(a, tmp2)
           bind(a, saved-label)
+          add(call-labels, saved-label)
         YIELD-OPCODE :
           val continue-label = new-label(a)
           ;Save current stack
@@ -961,6 +963,7 @@ defmethod encode (enc:JITEncoder, fid:Int, func:VMFunction, resolver:EncodingRes
           get-pc(a, tmp1)
           jmp(a, tmp1)
           bind(a, continue-label)
+          add(call-labels, continue-label)
         RETURN-OPCODE : 
           dump(a, "<-- FID %d\n", [fid]) when tracing?
           get-return(a, tmp1)
@@ -1227,6 +1230,7 @@ defmethod encode (enc:JITEncoder, fid:Int, func:VMFunction, resolver:EncodingRes
         PUSH-FRAME(num-locals, end-label)
         jmp(a, tmp2)
         bind(a, end-label)
+        add(call-labels, end-label)
       switch(opcode) :
         RESERVE-OPCODE-LOCAL :
           val size = tmp3
@@ -1922,7 +1926,7 @@ defmethod encode (enc:JITEncoder, fid:Int, func:VMFunction, resolver:EncodingRes
 
         restore-local-registers(a)
 
-        record-trace-entry(trace-entry(ins))
+        ; record-trace-entry(trace-entry(ins)) ; TODO
 
         ;Move return x86 registers into resulting locals
 
@@ -2026,7 +2030,7 @@ defmethod encode (enc:JITEncoder, fid:Int, func:VMFunction, resolver:EncodingRes
                 (f:ExternId) :
                   val address = to-bits(f) as Long
                   emit-ins-d(CALLC-OPCODE-WIDE, num-locals, address)
-              record-trace-entry(trace-entry(ins))
+              ; record-trace-entry(trace-entry(ins)) ; TODO
 
               ;Retrieve return registers
               defn return-register-index (l:CallLoc) :

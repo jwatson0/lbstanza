@@ -26,8 +26,7 @@ defmethod encode (enc:CVMEncoder, fid:Int, func:VMFunction, resolver:EncodingRes
   val trace-entry-table = Vector<TraceTableEntry>()
   defn record-trace-entry (entry:StackTraceEntry|False) :
     match(entry:StackTraceEntry) :
-      add(trace-entry-table, TraceTableEntry(buffer-pos(), entry))
-
+      add(trace-entry-table, TraceTableEntry(buffer-pos() * 4, entry))
   ;Delay the generation of this instruction,
   ;Instruction takes up the given number of 'instruction-words'.
   defn delayed-ins (f:() -> ?, instruction-words:Int) :
