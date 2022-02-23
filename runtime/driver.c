@@ -95,12 +95,10 @@ typedef struct{
   stz_long system_stack;
   stz_byte* heap_top;
   stz_byte* heap_limit;
-  stz_byte* heap_start;
-  stz_byte* young_gen_start;
-  stz_byte* heap_bitset;
-  stz_byte* heap_bitset_base;
   stz_long heap_size;
   stz_long heap_max_size;
+  stz_byte* heap_from_space;
+  stz_byte* heap_to_space;
   Stack* stacks;
   void* trackers;
   stz_byte* marking_stack_start;
@@ -1051,7 +1049,7 @@ static void* alloc (VMInit* init, long tag, long size){
 
 static Stack* alloc_stack (VMInit* init){
   Stack* stack = alloc(init, STACK_TYPE, sizeof(Stack));
-  stz_long initial_stack_size = 8 * 1024;
+  stz_long initial_stack_size = 4 * 1024;
   StackFrame* frames = (StackFrame*)stz_malloc(initial_stack_size);
   stack->size = initial_stack_size;
   stack->frames = frames;
@@ -1061,8 +1059,8 @@ static Stack* alloc_stack (VMInit* init){
 }
 
 //Given a pointer to a struct allocated on the heap,
-//add the tag bits to the pointer. 
-uint64_t tag_as_ref (void* p){
+//add the tag bits to the pointer.
+static inline uint64_t tag_as_ref (void* p){
   return (uint64_t)p - 8 + 1;
 }
 
@@ -1077,7 +1075,7 @@ enum {
 #define SYSTEM_PAGE_SIZE 4096UL
 #define ROUND_UP_TO_WHOLE_PAGES(x) (((x) + (SYSTEM_PAGE_SIZE - 1)) & ~(SYSTEM_PAGE_SIZE - 1))
 
-static stz_long bitset_size (stz_long heap_size) {
+static inline stz_long bitset_size (stz_long heap_size) {
   long heap_size_in_longs = (heap_size + (BYTES_IN_LONG - 1)) >> LOG_BYTES_IN_LONG;
   long bitset_size_in_longs = (heap_size_in_longs + (BITS_IN_LONG - 1)) >> LOG_BITS_IN_LONG;
   return ROUND_UP_TO_WHOLE_PAGES(bitset_size_in_longs << LOG_BYTES_IN_LONG);
@@ -1090,34 +1088,14 @@ STANZA_API_FUNC int main (int argc, char* argv[]) {
   VMInit init;
 
   //Allocate heap
-  const stz_long min_heap_size = ROUND_UP_TO_WHOLE_PAGES(8 * 1024 * 1024);
-  const stz_long max_heap_size = ROUND_UP_TO_WHOLE_PAGES(STZ_LONG(8) * 1024 * 1024 * 1024);
-  init.heap_start = (stz_byte*)stz_memory_map(min_heap_size, max_heap_size);
+  const stz_long min_heap_size = ROUND_UP_TO_WHOLE_PAGES(1024 * 1024);
+  const stz_long max_heap_size = ROUND_UP_TO_WHOLE_PAGES(STZ_LONG(4) * 1024 * 1024 * 1024);
   init.heap_max_size = max_heap_size;
   init.heap_size = min_heap_size;
-  stz_long young_gen_size = 2 * 1024 * 1024;
-  init.heap_limit = init.heap_start + young_gen_size;
-  init.heap_top = init.heap_start;
-  init.young_gen_start = init.heap_start;
-
-  //Allocate bitset for heap
-  const stz_long min_bitset_size = bitset_size(min_heap_size);
-  const stz_long max_bitset_size = bitset_size(max_heap_size);
-  init.heap_bitset = (stz_byte*)stz_memory_map(min_bitset_size, max_bitset_size);  
-  init.heap_bitset_base = init.heap_bitset - ((uint64_t)init.heap_start >> 6);
-  memset(init.heap_bitset, 0, min_bitset_size);
-
-  //For bitset_base computation to work: bitset must be aligned to 512-bytes boundary.
-  if((uint64_t)init.heap_bitset % 512 != 0){
-    fprintf(stderr, "Unaligned bitset: %p.\n", init.heap_bitset);
-    exit(-1);
-  }
-
-  //Allocate marking stack for heap
-  const stz_long marking_stack_size = ROUND_UP_TO_WHOLE_PAGES((1024 * 1024L) << LOG_BYTES_IN_LONG);
-  init.marking_stack_start = stz_memory_map(marking_stack_size, marking_stack_size);
-  init.marking_stack_bottom = init.marking_stack_start + marking_stack_size;
-  init.marking_stack_top = init.marking_stack_bottom;
+  init.heap_from_space = (stz_byte*)stz_memory_map(min_heap_size, max_heap_size);
+  init.heap_to_space = (stz_byte*)stz_memory_map(min_heap_size, max_heap_size);
+  init.heap_top = init.heap_to_space;
+  init.heap_limit = init.heap_top + init.heap_size;
 
   //Allocate stacks
   Stack* entry_stack = alloc_stack(&init);

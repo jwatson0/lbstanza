@@ -14,7 +14,6 @@ defpackage stz/vm :
   import stz/branch-table
   import stz/backend
   import stz/utils
-  import stz/extern-intrinsics
 
 ;<doc>=======================================================
 ;================= Virtual Machine Interface ================
@@ -370,8 +369,8 @@ public lostanza defn VirtualMachine (backend:ref<Backend>) -> ref<VirtualMachine
 lostanza defn get-class (tag:long) -> ref<VMClass> :
   return get(vmtable(current-vm()).class-table, new Int{tag as int})
 
-lostanza defn vm-allocation-size (p:ptr<long>, tag:long) -> long :
-  ;Use the tag to retrieve the object's class record.
+lostanza defn vm-allocation-size (p:ptr<long>) -> long :
+  val tag = [p]
   val class = get-class(tag)
   match(class) :
     (class:ref<VMLeafClass>) :
@@ -420,7 +419,7 @@ lostanza defn vm-iterate-references-in-stack-frames (stack:ptr<Stack>,
 
 lostanza defn vm-iterate-references (p:ptr<long>, tag:long,
                                      f:ptr<((ptr<long>, ptr<Heap>) -> ref<False>)>,
-                                     heap:ptr<Heap>) -> ref<False> :
+                                     heap:ptr<Heap>) -> long :
   val class = get-class(tag)
   match(class) :
     (class:ref<VMLeafClass>) :
@@ -431,6 +430,7 @@ lostanza defn vm-iterate-references (p:ptr<long>, tag:long,
       for (var i:int = 0, i < num-roots, i = i + 1) :
         val r = get(roots, new Int{i}).value
         [f](addr(obj.slots[r]), heap)
+      return size(class).value
     (class:ref<VMArrayClass>) :
       val base-roots = base-roots(class)
       val num-base-roots = length(base-roots).value
@@ -442,17 +442,16 @@ lostanza defn vm-iterate-references (p:ptr<long>, tag:long,
       ;Scan item roots
       val item-roots = item-roots(class)
       val num-item-roots = length(item-roots).value
+      val base-size = base-size(class).value
+      val item-size = item-size(class).value
+      val items-len = array.slots[0] * item-size
       if num-item-roots > 0 :
-        var items:ptr<long> = addr(array.slots) + base-size(class).value
-        val item-size = item-size(class).value
-        val len = array.slots[0]
-        for (var n:long = 0, n < len, n = n + 1) :
+        var items:ptr<long> = addr(array.slots) + base-size
+        for (val limit = items + items-len, items < limit, items = items + item-size) :
           for (var i:int = 0, i < num-item-roots, i = i + 1) :
             val r = get(item-roots, new Int{i}).value
             [f](addr(items[r]), heap)
-          items = items + item-size
-  ;No meaningful return value
-  return false
+      return base-size + items-len
 
 ;============================================================
 ;================= Bytecode Loop ============================
@@ -677,6 +676,33 @@ lostanza defn num-slots (f:ptr<StackFrame>, vm:ref<VirtualMachine>) -> int :
 ;==================== Liveness Detector =====================
 ;============================================================
 
+lostanza defn ref-mark-live (ref:ptr<long>, heap:ptr<Heap>) -> ref<False> :
+  ;Retrieve the value at the given heap pointer.
+  val v = [ref] - 1L
+  ;Is this a reference to a Stanza heap object?
+  if (v & 7L) == 0L :
+    mark-live(v as ptr<long>, heap)
+  ;No meaningful return value
+  return false
+
+lostanza defn mark-live (p:ptr<long>, heap:ptr<Heap>) -> ref<False> :
+  val tag = [p]
+  if forwarding-pointer?(tag) == 0L :
+    ;For each object two values are stored:
+    ;- Ponter back to the header
+    ;- Previous header contents
+    ;This is always possible as minimum object size is two 8-byte words.
+    ;If minumum object size were a single 8-byte word, only previous header contents
+    ;would have to be stored, and heap.to-space would need to be scanned
+    ;to restore the headers instaed of from-space.
+    val top = heap.top
+    top[0] = p as long
+    top[1] = tag
+    [p] = top as long
+    heap.top = top + 2 * sizeof(long)
+  ;No meaningful return value
+  return false
+
 val EMPTY-TUPLE = []
 public lostanza defn compute-live (vm:ref<VirtualMachine>, exclude:ref<Seqable<Symbol>>) -> ref<Tuple<Rec>> :
   ;If virtual machine is not yet initialized, then return empty tuple.
@@ -688,7 +714,10 @@ public lostanza defn compute-live (vm:ref<VirtualMachine>, exclude:ref<Seqable<S
 
   ;Perform full GC to get rid of unreachable stacks and liveness-tracked objects
   val heap = heap(vm)
-  full-heap-collection(heap)
+  collect-garbage(0L, heap)
+  val saved-top = heap.top
+  heap.top = heap.from-space
+  heap.scan = heap.from-space
 
   ;Scan global roots
   val vmtable = vmtable(vm)
@@ -696,41 +725,43 @@ public lostanza defn compute-live (vm:ref<VirtualMachine>, exclude:ref<Seqable<S
   val roots = to-seq(roots(vmtable.global-table, exclude))
   while empty?(roots) == false :
     val i = next(roots).value
-    mark-from-root(addr(globals[i]), heap)
+    ref-mark-live(addr(globals[i]), heap)
   ;Const roots do not affect liveness
 
-  ;Scan stack roots assuming all heap's stacks are live. It may be too conservative.
-  ;Superfluous dependencies can be added to the set. In this case, consider performing full GC
-  ;first to get rid of dead stacks.
-  for (var stack:ptr<Stack> = heap.stacks, stack != null, stack = stack.tail) :
-    val stack-obj = stack as ptr<?> - sizeof(long)
-    set-mark(stack-obj, heap)
-    iterate-references-in-stack-frames(stack, addr(mark-from-root), heap)
-
   ;Scan liveness trackers assuming all heap's liveness-tracked objects are live.
-  ;Superfluous dependencies can be added to the set. In this case, consider performing full GC
-  ;first to get rid of dead stacks.
   for (var tracker:ptr<LivenessTracker> = heap.liveness-trackers, tracker != null, tracker = tracker.tail) :
     val tracker-obj = tracker as ptr<?> - sizeof(long)
-    set-mark(tracker-obj, heap)
+    mark-live(tracker-obj, heap)
     val value-obj = (tracker.value - 1) as ptr<?>
-    set-mark(value-obj, heap)
+    mark-live(value-obj, heap)
 
-  complete-marking(heap)
+  ;Transitively mark live all objects reachable from already marked live objects.
+  for (var scan:ptr<long> = heap.scan, scan < heap.top, scan = scan + 2 * sizeof(long)) :
+    val p = scan[0] as ptr<long>
+    val tag = scan[1]
+    vm-iterate-references(p, tag, addr(ref-mark-live), heap)
+    if tag == STACK-TYPE.value :
+      val stack = (p + 8) as ptr<Stack>
+      if stack.frames != null :
+        vm-iterate-references-in-stack-frames(stack, addr(ref-mark-live), heap)
 
   ;Get live set
   val live-recs = RecSet()
   val vm-ids = vm-ids(vm)
   val heap-top = heap.top
-  for (var p:ptr<long> = heap.start, p < heap-top, p = p + allocation-size(p, heap)) :
-    if test-and-clear-mark(p, heap) != 0 :
-      val tag = [p] as int
-      if tag == FN-TYPE.value :
-        val f = (p + sizeof(long)) as ptr<Function>
-        val code = new Int{f.code as int}
-        add-all(live-recs, function-dependencies(vm-ids, code))
-      else :
-        add-all(live-recs, class-dependencies(vm-ids, new Int{tag}))
+  for (var scan:ptr<long> = heap.from-space, scan < heap-top, scan = scan + 2 * sizeof(long)) :
+    val p = scan[0] as ptr<long>
+    val tag = scan[1]
+    ;Restore original header: replace forwarding pointer with original tag.
+    [p] = tag
+    if tag as int == FN-TYPE.value :
+      val f = (p + sizeof(long)) as ptr<Function>
+      val code = new Int{f.code as int}
+      add-all(live-recs, function-dependencies(vm-ids, code))
+    else :
+      add-all(live-recs, class-dependencies(vm-ids, new Int{tag as int}))
+  ;Restore heap.top
+  heap.top = saved-top
   ;Restore VIRTUAL-MACHINE
   VIRTUAL-MACHINE = saved-vm
   ;Return ids
@@ -745,7 +776,7 @@ defn RecSet () :
 
 lostanza defn dump-heap (vm:ref<VirtualMachine>) -> int :
   val heap = heap(vm)
-  return dump-heap(heap.start, heap.top, vm)
+  return dump-heap(heap.to-space, heap.top, vm)
 
 lostanza defn dump-heap (pstart:ptr<long>, pend:ptr<long>, vm:ref<VirtualMachine>) -> int :
   val stackrefs = Vector<Long>()
@@ -873,7 +904,7 @@ defn EncodingResolver (class-table:ClassTable, branch-table:BranchTable, live-ma
       val c = loaded-class(class-table, n)
       match(class(c)) :
         (class:VMArrayClass|VMLeafClass) : package(c) == `core
-        (class) : false        
+        (class) : false
     defmethod marker? (this, n:Int) :
       match(class-table[n]) :
         (c:VMLeafClass) : size(c) == 0 and not unique?(class-table,n)

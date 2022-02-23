@@ -401,18 +401,11 @@ typedef struct{
   uint64_t system_stack;
   char* top;
   char* limit;
-  char* start;
-  uint64_t* collection_start;
-  uint64_t* bitset;
-  uint64_t* bitset_base;
   uint64_t size;
   uint64_t max_size;
-  uint64_t* marking_stack_start;
-  uint64_t* marking_stack_bottom;
-  uint64_t* marking_stack_top;
-  char* compaction_start;
-  char* min_incomplete;
-  char* max_incomplete;
+  char* from_space;
+  char* to_space;
+  char* scan;
   struct Stack* stacks;
   void* liveness_trackers;
   void* allocation_size;
@@ -508,6 +501,43 @@ static inline uint64_t test_and_set_mark (const void* p, uint64_t* bitset_base) 
   return old_value & mask;
 }
 
+static inline uint64_t lowest_zero_bit_count (uint64_t bits) {
+  if (!bits) return -1;
+
+  //Ones are rare, expect zeroes
+  uint64_t index = 0;
+  //If the next 32 bits in 'bits' is zero, then advance bits and index by 32.
+  if (!(bits & 0x0FFFFFFFF)) {
+    bits >>= 32;
+    index += 32;
+  }
+  //If the next 16 bits in 'bits' is zero, then advance bits and index by 16.
+  if (!(bits & 0x0FFFF)) {
+    bits >>= 16;
+    index += 16;
+  }
+  //If the next 8 bits in 'bits' is zero, then advance bits and index by 8.
+  if (!(bits & 0xFF)) {
+    bits >>= 8;
+    index += 8;
+  }
+  //If the next 4 bits in 'bits' is zero, then advance bits and index by 4.
+  if (!(bits & 0xF)) {
+    bits >>= 4;
+    index += 4;
+  }
+  //If the next 2 bits in 'bits' is zero, then advance bits and index by 2.
+  if (!(bits & 0x3)) {
+    bits >>= 2;
+    index += 2;
+  }
+  //If the next bit in 'bits' is zero, then advance index by 1.
+  if (!(bits & 0x1)) {
+    index++;
+  }
+  return index;
+}
+
 //============================================================
 //========================= TRAPS ============================
 //============================================================
@@ -532,7 +562,7 @@ int read_dispatch_table (VMState* vms, int format);
 static inline void barriered_store (const VMState* vms, uint64_t* address, uint64_t value) {
   // First store the value
   *address = value;
-  set_mark(address, vms->heap.bitset_base);
+  // set_mark(address, vms->heap.bitset_base);
 }
 
 //============================================================
