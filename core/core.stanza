@@ -2175,6 +2175,8 @@ lostanza defn mark-compact (vms:ptr<VMState>) -> ref<False> :
 
   val start-time = now-time()
 
+  val start-time = now-time()
+
   ;Three major phases:
   ;1. Mark
   ;2. Relocate references
@@ -2213,6 +2215,14 @@ lostanza defn mark-compact (vms:ptr<VMState>) -> ref<False> :
 
     ;Phase 3. Compact
     compact(vms)
+
+  val end-time = now-time()
+  total-time-in-gc = total-time-in-gc + (end-time - start-time)
+  val total-time-in-program = end-time - start-time-in-program
+  call-c clib/printf("[Garbage Collection Statistics]\n")
+  call-c clib/printf("Total Time spent in program: %ld ms\n", total-time-in-program)
+  call-c clib/printf("Total Time spent in GC: %ld ms\n", total-time-in-gc)
+  call-c clib/printf("Percentage of Time in GC: %f\n", (100.0f * total-time-in-gc as float) / total-time-in-program as float)
 
   val end-time = now-time()
   total-time-in-gc = total-time-in-gc + (end-time - start-time)
