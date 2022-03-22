@@ -132,6 +132,9 @@ void assembler_mod_reg(Assembler *a, const Gp *divisor) {
 void assembler_add_int(Assembler *a, const Gp *dst, int src) {
   a->add(*dst, src);
 }
+void assembler_sub_int(Assembler *a, const Gp *dst, int src) {
+  a->sub(*dst, src);
+}
 void assembler_sub_reg(Assembler *a, const Gp *dst, const Gp *src) {
   a->sub(*dst, *src);
 }
@@ -510,6 +513,30 @@ const Xmm* x86_xmm6(void) {
 }
 const Xmm* x86_xmm7(void) {
   return &xmm7;
+}
+const Xmm* x86_xmm8(void) {
+  return &xmm8;
+}
+const Xmm* x86_xmm9(void) {
+  return &xmm9;
+}
+const Xmm* x86_xmm10(void) {
+  return &xmm10;
+}
+const Xmm* x86_xmm11(void) {
+  return &xmm11;
+}
+const Xmm* x86_xmm12(void) {
+  return &xmm12;
+}
+const Xmm* x86_xmm13(void) {
+  return &xmm13;
+}
+const Xmm* x86_xmm14(void) {
+  return &xmm14;
+}
+const Xmm* x86_xmm15(void) {
+  return &xmm15;
 }
 
 const Rip* x86_rip(void) {

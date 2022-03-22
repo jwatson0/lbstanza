@@ -554,7 +554,7 @@ defn dump-stack-state (a:Assembler, msg:String) :
 ;Used for initiated REPL call or stz-extern callback
 
 public defn make-jit-launch (rt:JitRuntime, vms:Long) -> Func :
-  within (code, a) = gen-code(rt, disassembling?, JIT-LOG-FILE) :
+  within (code, a) = gen-code(rt, false, disassembling?, JIT-LOG-FILE) :
     ; Setup JIT registers
     val out? = debugging? ; or tracing?
     mov(a, tmp1, c-params[0])  ;CRSP is first C argument
@@ -601,7 +601,7 @@ defn swap-current-and-system-state (a:Assembler) :
 ;JIT Trampoline for extending stack called from function when stack overflow is detected
 ;in FNENTRY instruction.  Must switch to system state, save state, and then call extend-stack
 public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func) -> Func : 
-  within (code, a) = gen-code(rt, disassembling?, JIT-LOG-FILE) :
+  within (code, a) = gen-code(rt, false, disassembling?, JIT-LOG-FILE) :
     val end-label     = tmp2
     val size-required = tmp3
     ;Save current stack
@@ -623,7 +623,7 @@ public defn make-extend-stack-launch (rt:JitRuntime, stack-overflow-return:Func)
 ;JIT Function for returning from stack extension and returning to FNENTRY VM instruction
 ;by switch back to user stack and restoring state
 public defn make-extend-stack-return (rt:JitRuntime) -> Func :
-  within (code, a) = gen-code(rt, disassembling?, JIT-LOG-FILE) :
+  within (code, a) = gen-code(rt, false, disassembling?, JIT-LOG-FILE) :
     ;System stack no longer needed
     set-stack-pointer(a, CONST(a, tmp1, 0))
     ;Swap stack and registers
@@ -654,7 +654,7 @@ defmethod encode (enc:JITEncoder, fid:Int, func:VMFunction, resolver:EncodingRes
   val rt = rt(enc)
   val extend-stack-launch-value = value(extend-stack-launcher(enc))
   val trace-entry-table = Vector<TraceTableEntry>()
-  val f = within (code, a) = gen-code(rt, disassembling?, JIT-LOG-FILE) :
+  val f = within (code, a) = gen-code(rt, false, disassembling?, JIT-LOG-FILE) :
     ; tracing? = fid == 3293 ; 4510
     println(JIT-LOG-FILE, "--- ENCODING %_" % [fid]) when (dumping-opcodes? or debugging? or disassembling?)
     dump(a, "--> FID %d\n", [fid]) when tracing?

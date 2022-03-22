@@ -15,7 +15,8 @@ extern "C" {
     ZyanU8 *data;
     uint64_t length;
   StzDecoder(ZyanU8* data, uint64_t length) :
-    data(data), length(length), runtime_address((ZyanU64)data), offset(0) { }
+    // data(data), length(length), runtime_address((ZyanU64)data), offset(0) { }
+    data(data), length(length), runtime_address(0x0), offset(0) { }
   };
   StzDecoder* zydis_new_decoder (ZyanU8* code, uint64_t len);
   int zydis_decode (StzDecoder* dec);

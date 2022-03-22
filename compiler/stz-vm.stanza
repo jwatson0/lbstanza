@@ -439,6 +439,7 @@ public lostanza defn VirtualMachine (backend:ref<Backend>) -> ref<VirtualMachine
   val jit? = EXPERIMENTAL
   var encoder:ref<VMEncoder>
   if jit? == true :
+    call-c clib/printf("*** JIT ***\n")
     encoder = JITEncoder(rt, extend-stack-launcher, extend-stack-returner)
   else :
     encoder = CVMEncoder()

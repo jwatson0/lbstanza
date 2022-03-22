@@ -61,6 +61,7 @@ extern "C" {
   void assembler_div_reg(Assembler *a, const Gp *divisor);
   void assembler_mod_reg(Assembler *a, const Gp *divisor);
   void assembler_add_int(Assembler *a, const Gp *dst, int);
+  void assembler_sub_int(Assembler *a, const Gp *dst, int);
   void assembler_sub_reg(Assembler *a, const Gp *dst, const Gp *src);
   void assembler_and_reg(Assembler *a, const Gp *dst, const Gp *src);
   void assembler_and_int(Assembler *a, const Gp *dst, int src);
@@ -190,6 +191,14 @@ extern "C" {
   const Xmm* x86_xmm5(void);
   const Xmm* x86_xmm6(void);
   const Xmm* x86_xmm7(void);
+  const Xmm* x86_xmm8(void);
+  const Xmm* x86_xmm9(void);
+  const Xmm* x86_xmm10(void);
+  const Xmm* x86_xmm11(void);
+  const Xmm* x86_xmm12(void);
+  const Xmm* x86_xmm13(void);
+  const Xmm* x86_xmm14(void);
+  const Xmm* x86_xmm15(void);
   const Rip* x86_rip(void);
   void dump_registers (void);
   void dump_memory_64 (uint64_t* start, uint64_t n);

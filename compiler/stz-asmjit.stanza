@@ -53,6 +53,7 @@ extern assembler_jb: (ptr<?>, ptr<?>) -> int
 extern assembler_jbe: (ptr<?>, ptr<?>) -> int
 extern assembler_add_int: (ptr<?>, ptr<?>, long) -> int
 extern assembler_add_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
+extern assembler_sub_int: (ptr<?>, ptr<?>, long) -> int
 extern assembler_sub_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_imul_reg: (ptr<?>, ptr<?>, ptr<?>) -> int
 extern assembler_div_reg: (ptr<?>, ptr<?>) -> int
@@ -182,6 +183,14 @@ extern x86_xmm4: () -> ptr<?>
 extern x86_xmm5: () -> ptr<?>
 extern x86_xmm6: () -> ptr<?>
 extern x86_xmm7: () -> ptr<?>
+extern x86_xmm8: () -> ptr<?>
+extern x86_xmm9: () -> ptr<?>
+extern x86_xmm10: () -> ptr<?>
+extern x86_xmm11: () -> ptr<?>
+extern x86_xmm12: () -> ptr<?>
+extern x86_xmm13: () -> ptr<?>
+extern x86_xmm14: () -> ptr<?>
+extern x86_xmm15: () -> ptr<?>
 
 extern x86_rip: () -> ptr<?>
 
@@ -197,13 +206,13 @@ public lostanza deftype Assembler :
 public lostanza deftype Label :
   value: ptr<?>
   id: int
-public lostanza deftype Gp :
+public lostanza deftype Gp <: Equalable :
   value: ptr<?>
   id: int
   num-bytes: int
 public lostanza deftype Rip :
   value: ptr<?>
-public lostanza deftype Xmm :
+public lostanza deftype Xmm <: Equalable :
   value: ptr<?>
   id: int
 public lostanza deftype Func <: Unique :
@@ -211,6 +220,11 @@ public lostanza deftype Func <: Unique :
 public lostanza deftype MemPtr :
   value: ptr<?>
 
+defmethod equal? (a:Gp, b:Gp) -> True|False :
+  id(a) == id(b)
+defmethod equal? (a:Xmm, b:Xmm) -> True|False :
+  id(a) == id(b)
+  
 public lostanza defn flatten (code:ref<CodeHolder>) -> ref<False> :
   call-c code_holder_flatten(code.value)
   return false
@@ -459,6 +473,30 @@ public val xmm6 = new-xmm6()
 lostanza defn new-xmm7 () -> ref<Xmm> :
   return new Xmm{ call-c x86_xmm7(), 7 }
 public val xmm7 = new-xmm7()
+lostanza defn new-xmm8 () -> ref<Xmm> :
+  return new Xmm{ call-c x86_xmm8(), 8 }
+public val xmm8 = new-xmm8()
+lostanza defn new-xmm9 () -> ref<Xmm> :
+  return new Xmm{ call-c x86_xmm9(), 9 }
+public val xmm9 = new-xmm9()
+lostanza defn new-xmm10 () -> ref<Xmm> :
+  return new Xmm{ call-c x86_xmm10(), 10 }
+public val xmm10 = new-xmm10()
+lostanza defn new-xmm11 () -> ref<Xmm> :
+  return new Xmm{ call-c x86_xmm11(), 11 }
+public val xmm11 = new-xmm11()
+lostanza defn new-xmm12 () -> ref<Xmm> :
+  return new Xmm{ call-c x86_xmm12(), 12 }
+public val xmm12 = new-xmm12()
+lostanza defn new-xmm13 () -> ref<Xmm> :
+  return new Xmm{ call-c x86_xmm13(), 13 }
+public val xmm13 = new-xmm13()
+lostanza defn new-xmm14 () -> ref<Xmm> :
+  return new Xmm{ call-c x86_xmm14(), 14 }
+public val xmm14 = new-xmm14()
+lostanza defn new-xmm15 () -> ref<Xmm> :
+  return new Xmm{ call-c x86_xmm15(), 15 }
+public val xmm15 = new-xmm15()
 
 lostanza defn new-rip () -> ref<Rip> :
   return new Rip{ call-c x86_rip() }
@@ -508,14 +546,15 @@ public lostanza defn call (func:ref<Func>, a0:ptr<?>, a1:ptr<?>) -> ref<Long> :
 
 ;For use with `within'
 
-public defn gen-code (f: (CodeHolder, Assembler) -> ?, rt:JitRuntime, disassembling?:True|False, out:FileOutputStream) -> Func :
+public defn gen-code (f: (CodeHolder, Assembler) -> ?, rt:JitRuntime, show-size?:True|False, disassembling?:True|False, out:FileOutputStream) -> Func :
   val code = code-holder-new(rt)
   val assembler = assembler-new(code)
   f(code, assembler)
   val func = add(rt, code)
-  if disassembling? :
+  if disassembling? or show-size? :
     flatten(code)
-    disassemble(value(func), size(code), out)
+    println(out, "SIZE: %_" % [size(code)]) when show-size?
+    disassemble(value(func), size(code), out) when disassembling?
     flush(out)
   delete(assembler)
   reset(code)
@@ -592,6 +631,9 @@ public lostanza defn neg (a:ref<Assembler>, dst:ref<Gp>) -> ref<Gp> :
   return dst
 public lostanza defn sub (a:ref<Assembler>, dst:ref<Gp>, src:ref<Gp>) -> ref<Gp> :
   call-c assembler_sub_reg(a.value, dst.value, src.value)
+  return dst
+public lostanza defn sub (a:ref<Assembler>, dst:ref<Gp>, value:ref<Int>) -> ref<Gp> :
+  call-c assembler_sub_int(a.value, dst.value, value.value)
   return dst
 public lostanza defn shl (a:ref<Assembler>, dst:ref<Gp>, value:ref<Int>) -> ref<Gp> :
   call-c assembler_shl_int(a.value, dst.value, value.value)
