@@ -2467,12 +2467,8 @@ public lostanza defn collect-garbage (allocation-size:long, vms:ptr<VMState>) ->
       if young-generation-size <= max-young-generation-size :
         mark-compact(vms)
         if young-generation-size <= heap-end(heap) - heap.top :
-          val max-survivors-fraction = 16
-          val max-survivors = young-generation-size / max-survivors-fraction
-          val survivors = heap.top - heap.collection-start
-          if survivors > max-survivors :
-            clear-remembered-set(heap)
-            heap.collection-start = heap.top
+          clear-remembered-set(heap)
+          heap.collection-start = heap.top
           ;heap.limit = heap.top + young-generation-size
           ;return young-generation-size
           heap.limit = heap-end(heap)
