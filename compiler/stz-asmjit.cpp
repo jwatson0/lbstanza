@@ -6,7 +6,8 @@ using namespace asmjit;
 using namespace x86;
 
 JitRuntime* jit_runtime_new(void) {
-  return new JitRuntime();
+  JitAllocator::CreateParams params {};
+  return new JitRuntime(&params);
 }
 void jit_runtime_delete(JitRuntime* rt) {
   
@@ -21,8 +22,8 @@ void jit_runtime_release(JitRuntime* rt, void *c) {
   rt->_release(c);
 }
 CodeHolder* code_holder_new(JitRuntime *rt) {
-  auto c = new CodeHolder();
-  c->init(rt->codeInfo());
+  auto c = new CodeHolder(NULL);
+  c->init(rt->environment());
   return c;
 }
 int code_holder_label_offset(CodeHolder *c, Label *f) {
@@ -32,7 +33,7 @@ void code_holder_delete(CodeHolder *c) {
   delete c;
 }
 void code_holder_reset(CodeHolder *c) {
-  c->reset();
+  c->reset(ResetPolicy::kHard);
 }
 int code_holder_size(CodeHolder *c) {
   return c->codeSize();
