@@ -1,6 +1,6 @@
 defpackage stz/asmjit :
   import core
-  import stz/zydis
+  ; import stz/zydis
 
 ;ASMJIT -- STANZA INTERFACE
 
@@ -554,7 +554,7 @@ public defn gen-code (f: (CodeHolder, Assembler) -> ?, rt:JitRuntime, show-size?
   if disassembling? or show-size? :
     flatten(code)
     println(out, "SIZE: %_" % [size(code)]) when show-size?
-    disassemble(value(func), size(code), out) when disassembling?
+    ; disassemble(value(func), size(code), out) when disassembling?
     flush(out)
   delete(assembler)
   reset(code)
