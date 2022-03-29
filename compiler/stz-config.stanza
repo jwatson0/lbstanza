@@ -230,7 +230,7 @@ public defn read-config-file () :
       throw(Exception("Could not locate .stanza configuration file."))
 
     ;Verify parameters
-    verify-installation()
+    ;verify-installation()
 
     ;Set configured to true
     STANZA-CONFIGURED? = true

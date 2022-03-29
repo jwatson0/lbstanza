@@ -1,0 +1,39 @@
+Clone and install AsmJIT
+```
+git clone https://github.com/asmjit/asmjit.git
+cd asmjit
+mkdir build
+cmake .
+make -j
+sudo make install
+```
+
+Check out Jonathan's branch
+```
+git checkout jb/asmjit
+```
+
+Build Stanza
+```
+cd stanzadev
+mkdir pkgs-boot pkgs-jit
+stanza build-stanza.proj stz/driver -flags BOOTSTRAP -o stanza-boot -pkg pkgs-boot -optimize
+./stanza-boot build-stanza.proj stz/driver -o stanza-jit -pkg pkgs-jit -optimize
+```
+
+Add experimental support in `.stanza` file.
+```
+Put the following in .stanza file:
+  experimental = true
+```
+
+Run the JIT
+```
+./stanza-jit repl
+```
+
+You should see `*** JIT ***` printed out.
+```
+*** JIT ***
+stanza> 
+```
