@@ -26,7 +26,7 @@ CodeHolder* code_holder_new(JitRuntime *rt) {
   c->init(rt->environment());
   return c;
 }
-int code_holder_label_offset(CodeHolder *c, Label *f) {
+uint64_t code_holder_label_offset(CodeHolder *c, Label *f) {
   return c->labelOffset(*f);
 }
 void code_holder_delete(CodeHolder *c) {
@@ -35,7 +35,7 @@ void code_holder_delete(CodeHolder *c) {
 void code_holder_reset(CodeHolder *c) {
   c->reset(ResetPolicy::kHard);
 }
-int code_holder_size(CodeHolder *c) {
+uint64_t code_holder_size(CodeHolder *c) {
   return c->codeSize();
 }
 void code_holder_flatten(CodeHolder *c) {
@@ -544,22 +544,22 @@ const Rip* x86_rip(void) {
   return &rip;
 }
 
-const MemPtr* x86_ptr_gp_base_const_offset_size(Gp *base_ptr, int32_t offset, int32_t size) {
+const MemPtr* x86_ptr_gp_base_const_offset_size(Gp *base_ptr, int32_t offset, uint32_t size) {
   auto base = *base_ptr;
   return new MemPtr(ptr(base, offset, size));
 }
 const MemPtr* x86_ptr_gp_base_index_const_shift_offset_size
-    (Gp *base_ptr, Gp* index_ptr, int32_t shift, int32_t offset, int32_t size) {
+    (Gp *base_ptr, Gp* index_ptr, uint32_t shift, int32_t offset, uint32_t size) {
   auto base = *base_ptr;
   auto index = *index_ptr;
   return new MemPtr(ptr(base, index, shift, offset, size));
 }
-const MemPtr* x86_ptr_label_base_index_const_shift_offset_size (Label *base_ptr, Gp* index_ptr, int32_t shift, int32_t offset, int32_t size) {
+const MemPtr* x86_ptr_label_base_index_const_shift_offset_size (Label *base_ptr, Gp* index_ptr, uint32_t shift, int32_t offset, uint32_t size) {
   auto base = *base_ptr;
   auto index = *index_ptr;
   return new MemPtr(ptr(base, index, shift, offset, size));
 }
-const MemPtr* x86_ptr_label_base_const_index_size (Label *base_ptr, int32_t index, int32_t size) {
+const MemPtr* x86_ptr_label_base_const_index_size (Label *base_ptr, int32_t index, uint32_t size) {
   auto base = *base_ptr;
   return new MemPtr(ptr(base, index, size));
 }
@@ -614,3 +614,4 @@ void dump_memory_8 (uint8_t* start, uint64_t n) {
     printf("%p: %x\n", ptr, *ptr);
   }
 }
+

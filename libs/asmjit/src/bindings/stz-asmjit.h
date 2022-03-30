@@ -18,8 +18,8 @@ extern "C" {
   void code_holder_reset(CodeHolder *c);
   void code_holder_delete(CodeHolder *c);
   void code_holder_flatten(CodeHolder *c);
-  int code_holder_size(CodeHolder *c);
-  int code_holder_label_offset(CodeHolder *c, Label *f);
+  uint64_t code_holder_size(CodeHolder *c);
+  uint64_t code_holder_label_offset(CodeHolder *c, Label *f);
   Assembler* assembler_new(CodeHolder *c);
   void assembler_delete(Assembler *a);
   Label* assembler_new_label(Assembler *a);
@@ -124,13 +124,13 @@ extern "C" {
   typedef uint64_t (*Func2)(uint64_t, uint64_t);
   uint64_t func_call1(Func1 f, uint64_t arg);
   uint64_t func_call2(Func2 f, uint64_t a0, uint64_t a1);
-  const MemPtr* x86_ptr_gp_base_const_offset_size(Gp *base, int32_t offset, int32_t size);
+  const MemPtr* x86_ptr_gp_base_const_offset_size(Gp *base, int32_t offset, uint32_t size);
   const MemPtr* x86_ptr_gp_base_index_const_shift_offset_size
-    (Gp *base, Gp* index, int32_t shift, int32_t offset, int32_t size);
+    (Gp *base, Gp* index, uint32_t shift, int32_t offset, uint32_t size);
   const MemPtr* x86_ptr_label_base_gp_index_const_shift_offset_size
-    (Label *base, Gp* index, int32_t shift, int32_t offset, int32_t size);
-  const MemPtr* x86_ptr_label_base_const_index_size (Label *base, int32_t index, int32_t size);
-  const MemPtr* x86_ptr_label_base_index_const_shift_offset_size (Label *base, Gp* index, int32_t shift, int32_t offset, int32_t size);
+    (Label *base, Gp* index, uint32_t shift, int32_t offset, uint32_t size);
+  const MemPtr* x86_ptr_label_base_const_index_size (Label *base, int32_t index, uint32_t size);
+  const MemPtr* x86_ptr_label_base_index_const_shift_offset_size (Label *base, Gp* index, uint32_t shift, int32_t offset, uint32_t size);
 
   const Gp* x86_al(void);
   const Gp* x86_bl(void);
