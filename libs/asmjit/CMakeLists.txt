@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+
+# Adjustments for Stanza Bindings
+# ===============================
 set(ASMJIT_STATIC true)
 set(CMAKE_CXX_COMPILER gcc)
+set(ASMJIT_BINDINGS_SRC_LIST
+    bindings/stz-asmjit.cpp
+    bindings/stz-asmjit.h)    
 
 cmake_policy(PUSH)
 
@@ -307,6 +313,7 @@ endif()
 # ===============
 
 set(ASMJIT_SRC_LIST
+  ${ASMJIT_BINDINGS_SRC_LIST}
   asmjit/asmjit.h
   asmjit/asmjit-scope-begin.h
   asmjit/asmjit-scope-end.h
