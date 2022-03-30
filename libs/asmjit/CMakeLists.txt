@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 set(ASMJIT_STATIC true)
+set(CMAKE_CXX_COMPILER gcc)
 
 cmake_policy(PUSH)
 

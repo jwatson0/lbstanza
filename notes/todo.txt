@@ -565,6 +565,38 @@ Bugs
 
   - When a code fails with `fatal`, the stacked `finally` blocks should not run.
 
+  - Read in a `
+    stanza> import stz/pkg
+    stanza> stz/config/read-config-file()
+    stanza> val p = load-pkg(PkgLoader(false), `stz/utils)    
+    stanza> val vmp = vmp(p as VMPackage)
+    NoFile:1.19: Could not resolve VMPackage.
+    stanza> import stz/vm-ir
+    stanza> val vmp = vmp(p as VMPackage)
+    NoFile:1.14: Cannot cast expression of type Pkg to type VMPackage.
+    stanza> val vmp = vmp(p as StPackage)
+    NoFile:1.19: Could not resolve StPackage.
+    stanza> val vmp = vmp(p as StdPackage)
+    NoFile:1.19: Could not resolve StdPackage.
+    stanza> val vmp = vmp(p as StdPkg)
+    FATAL ERROR: No appropriate branch for arguments of type (TUVar).
+      in core/print-stack-trace
+        at core/core.stanza:302.14
+      in core/fatal
+        at core/core.stanza:355.2
+      in core/no-branch-error
+        at core/core.stanza:242.2
+      in stz/tl-to-dl/compute-exports
+        at compiler/stz-tl-to-dl.stanza:62.12
+      in stz/tl-to-dl/compute-exports
+        at compiler/stz-tl-to-dl.stanza:61.8
+      in stz/tl-to-dl/compute-exports
+        at compiler/stz-tl-to-dl.stanza:95.27
+      in core/do
+        at core/core.stanza:8071.9
+      in stz/tl-to-dl/compute-exports
+        at compiler/stz-tl-to-dl.stanza:112.20
+      in stz/tl-to-dl/compute-packageio
 
 
 Checks
